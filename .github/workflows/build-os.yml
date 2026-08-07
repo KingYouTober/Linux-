@@ -5,24 +5,38 @@ on:
 
 jobs:
   build-os-image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies and pmbootstrap
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip python3-pipx git openssl systemd-container
-          # Install pmbootstrap directly via pipx as recommended by postmarketOS
-          pipx install pmbootstrap
-          # Ensure pipx binary directory is available in GitHub Action PATH
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          sudo apt-get install -y \
+            git \
+            openssl \
+            systemd-container \
+            python3-venv
+
+      - name: Install pmbootstrap
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pipx
+          python -m pipx ensurepath
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ~/.local/bin/pipx install pmbootstrap
+          ~/.local/bin/pmbootstrap --version
 
       - name: Initialize pmbootstrap for SM-T500
         run: |
-          # Configure pmbootstrap target device and UI profile
-          pmbootstrap init \
+          ~/.local/bin/pmbootstrap init \
             --work ~/.local/var/pmbootstrap \
             --aports ~/.local/var/pmbootstrap/cache_git/aports \
             --arch arm64 \
@@ -34,26 +48,24 @@ jobs:
 
       - name: Inject custom GTK configurations
         run: |
-          # Ensure destination config folder exists inside chroot rootfs
-          mkdir -p ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh/
-          
-          # Copy repository phosh.css into OS target directory
+          mkdir -p ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh
+
           if [ -f configs/phosh.css ]; then
-            cp configs/phosh.css ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh/phosh.css
+            cp configs/phosh.css \
+              ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh/phosh.css
           fi
 
       - name: Build rootfs and system image
         run: |
-          # Generate flashable images without interactive installers
-          pmbootstrap install --ondev --no-fsi
+          ~/.local/bin/pmbootstrap install --ondev --no-fsi
 
       - name: Export OS image artifacts
         run: |
           mkdir -p build-output
-          pmbootstrap export build-output/
+          ~/.local/bin/pmbootstrap export build-output/
 
       - name: Upload compiled OS artifact
         uses: actions/upload-artifact@v4
         with:
           name: postmarketos-smt500-phosh
-          path: build-output/*
+          path: build-output/**
