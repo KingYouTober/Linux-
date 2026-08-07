@@ -27,12 +27,16 @@ jobs:
 
       - name: Install pmbootstrap
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pipx
-          python -m pipx ensurepath
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          ~/.local/bin/pipx install pmbootstrap
-          ~/.local/bin/pmbootstrap --version
+           python -m pip install --upgrade pip
+           python -m pip install pipx
+
+           python -m pipx ensurepath
+
+           pipx --version
+
+           pipx install pmbootstrap
+
+           pmbootstrap --version
 
       - name: Initialize pmbootstrap for SM-T500
         run: |
