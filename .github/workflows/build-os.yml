@@ -1,0 +1,56 @@
+name: Build postmarketOS Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-os-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies and pmbootstrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip git openssl systemd-container
+          pip3 install pmbootstrap --break-system-packages
+
+      - name: Initialize pmbootstrap for SM-T500
+        run: |
+          # Configure pmbootstrap target device and UI profile
+          pmbootstrap init \
+            --work ~/.local/var/pmbootstrap \
+            --aports ~/.local/var/pmbootstrap/cache_git/aports \
+            --arch arm64 \
+            --device samsung-smt500 \
+            --ui phosh \
+            --hostname slim-os \
+            --channel edge \
+            --non-interactive
+
+      - name: Inject custom GTK configurations
+        run: |
+          # Ensure destination config folder exists inside chroot rootfs
+          mkdir -p ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh/
+          
+          # Copy repository phosh.css into OS target directory
+          if [ -f configs/phosh.css ]; then
+            cp configs/phosh.css ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh/phosh.css
+          fi
+
+      - name: Build rootfs and system image
+        run: |
+          # Generate flashable images without interactive installers
+          pmbootstrap install --ondev --no-fsi
+
+      - name: Export OS image artifacts
+        run: |
+          mkdir -p build-output
+          pmbootstrap export build-output/
+
+      - name: Upload compiled OS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: postmarketos-smt500-phosh
+          path: build-output/*
