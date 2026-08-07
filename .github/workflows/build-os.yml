@@ -13,8 +13,11 @@ jobs:
       - name: Install dependencies and pmbootstrap
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-pip git openssl systemd-container
-          pip3 install pmbootstrap --break-system-packages
+          sudo apt-get install -y python3-pip python3-pipx git openssl systemd-container
+          # Install pmbootstrap directly via pipx as recommended by postmarketOS
+          pipx install pmbootstrap
+          # Ensure pipx binary directory is available in GitHub Action PATH
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Initialize pmbootstrap for SM-T500
         run: |
