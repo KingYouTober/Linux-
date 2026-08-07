@@ -1,0 +1,78 @@
+/* Phosh Minimal GTK CSS - Optimized for low RAM & mouse debug navigation */
+
+/* Top Status Bar */
+.phosh-top-bar {
+  background-color: rgba(12, 14, 20, 0.95);
+  color: #ffffff;
+  min-height: 38px;
+  padding: 2px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.phosh-top-bar:hover {
+  background-color: rgba(25, 30, 45, 1.0);
+  cursor: pointer;
+}
+
+/* Quick Settings Pull-Down Menu */
+.phosh-top-panel {
+  background-color: #080b12;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+}
+
+/* Quick Setting Toggles with Mouse Accessibility Fixes */
+.phosh-quick-setting {
+  background-color: #141c2b;
+  color: #e2e8f0;
+  border-radius: 10px;
+  min-height: 52px;
+  min-width: 52px;
+  margin: 6px;
+  border: 1px solid transparent;
+  transition: background-color 0.1s ease-in-out, border-color 0.1s ease-in-out;
+}
+
+/* Mouse hover indicators for touch-broken dev targets */
+.phosh-quick-setting:hover {
+  background-color: #1e293b;
+  border-color: #3b82f6;
+  cursor: pointer;
+}
+
+.phosh-quick-setting:active {
+  background-color: #2563eb;
+  color: #ffffff;
+}
+
+/* Lockscreen Interface */
+.phosh-lockscreen {
+  background-image: none;
+  background-color: #030508;
+  color: #f8fafc;
+}
+
+.phosh-lockscreen-clock {
+  font-size: 68px;
+  font-weight: 700;
+  color: #60a5fa;
+  margin-bottom: 20px;
+}
+
+/* App Overview and Launcher */
+.phosh-overview {
+  background-color: rgba(8, 11, 18, 0.92);
+}
+
+.phosh-app-grid-button {
+  background: transparent;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.phosh-app-grid-button:hover {
+  background-color: rgba(59, 130, 246, 0.15);
+  cursor: pointer;
+}
