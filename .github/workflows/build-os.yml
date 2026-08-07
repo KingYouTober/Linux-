@@ -16,31 +16,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            git \
-            openssl \
-            systemd-container \
-            python3-venv
+          sudo apt-get install -y git openssl systemd-container python3-venv
 
-      - name: Install pmbootstrap
+      - name: Install pmbootstrap from git
         run: |
-           python -m pip install --upgrade pip
-           python -m pip install pipx
-
-           python -m pipx ensurepath
-
-           pipx --version
-
-           pipx install pmbootstrap
-
-           pmbootstrap --version
+          python -m pip install --upgrade pip
+          python -m pip install --user "git+https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/pmbootstrap" --version
 
       - name: Initialize pmbootstrap for SM-T500
         run: |
-          ~/.local/bin/pmbootstrap init \
+          pmbootstrap init \
             --work ~/.local/var/pmbootstrap \
             --aports ~/.local/var/pmbootstrap/cache_git/aports \
             --arch arm64 \
@@ -53,20 +43,18 @@ jobs:
       - name: Inject custom GTK configurations
         run: |
           mkdir -p ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh
-
           if [ -f configs/phosh.css ]; then
-            cp configs/phosh.css \
-              ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh/phosh.css
+            cp configs/phosh.css ~/.local/var/pmbootstrap/chroot_rootfs-samsung-smt500/etc/phosh/phosh.css
           fi
 
       - name: Build rootfs and system image
         run: |
-          ~/.local/bin/pmbootstrap install --ondev --no-fsi
+          pmbootstrap install --ondev --no-fsi
 
       - name: Export OS image artifacts
         run: |
           mkdir -p build-output
-          ~/.local/bin/pmbootstrap export build-output/
+          pmbootstrap export build-output/
 
       - name: Upload compiled OS artifact
         uses: actions/upload-artifact@v4
