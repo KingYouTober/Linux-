@@ -16,9 +16,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
             git \
             openssl \
@@ -38,30 +39,34 @@ jobs:
       - name: Install pmbootstrap
         run: |
           python -m pip install --upgrade pip
+
           python -m pip install --user \
-            "git+https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git"
+            "git+https://gitlab.postmarketOS.org/postmarketOS/pmbootstrap.git"
 
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+          export PATH="$HOME/.local/bin:$PATH"
+
           pmbootstrap --version
 
-      - name: Prepare directories
+      - name: Prepare pmbootstrap directories
         run: |
           mkdir -p "$HOME/.config"
           mkdir -p "$HOME/.local/var/pmbootstrap/cache_git"
 
       - name: Clone pmaports
         run: |
-          PMB_WORK="$HOME/.local/var/pmbootstrap"
-          PMB_APORTS="$PMB_WORK/cache_git/pmaports"
+          APORTS="$HOME/.local/var/pmbootstrap/cache_git/pmaports"
 
-          if [ ! -d "$PMB_APORTS/.git" ]; then
+          if [ ! -d "$APORTS/.git" ]; then
             git clone \
               --depth=1 \
-              --branch=master \
               https://gitlab.postmarketOS.org/postmarketOS/pmaports.git \
-              "$PMB_APORTS"
+              "$APORTS"
           fi
+
+          echo "pmaports:"
+          du -sh "$APORTS"
 
       - name: Generate pmbootstrap_v3.cfg
         run: |
@@ -69,44 +74,25 @@ jobs:
           WORK="$HOME/.local/var/pmbootstrap"
           APORTS="$WORK/cache_git/pmaports"
 
-          rm -f "$CONFIG"
+          cat > "$CONFIG" <<EOF
+          [pmbootstrap]
+          work = $WORK
+          aports = $APORTS
+          device = samsung-smt500
+          ui = phosh
+          hostname = slim-os
+          jobs = 4
+          is_default_channel = true
+          build_default_device_arch = true
+          EOF
 
-          pmbootstrap \
-            -c "$CONFIG" \
-            -y config work "$WORK"
+          echo "================================"
+          echo "GENERATED CONFIG"
+          echo "================================"
 
-          pmbootstrap \
-            -c "$CONFIG" \
-            -y config aports "$APORTS"
-
-          pmbootstrap \
-            -c "$CONFIG" \
-            -y config device "samsung-smt500"
-
-          pmbootstrap \
-            -c "$CONFIG" \
-            -y config ui "phosh"
-
-          pmbootstrap \
-            -c "$CONFIG" \
-            -y config hostname "slim-os"
-
-          pmbootstrap \
-            -c "$CONFIG" \
-            -y config jobs "4"
-
-          pmbootstrap \
-            -c "$CONFIG" \
-            -y config is_default_channel "true"
-
-          pmbootstrap \
-            -c "$CONFIG" \
-            -y config build_default_device_arch "true"
-
-          echo "===== GENERATED CONFIG ====="
           cat "$CONFIG"
 
-      - name: Validate configuration syntax
+      - name: Validate config file
         run: |
           CONFIG="$HOME/.config/pmbootstrap_v3.cfg"
 
@@ -115,10 +101,11 @@ jobs:
           echo "Config exists:"
           ls -lh "$CONFIG"
 
-          echo "Config contents:"
+          echo
+          echo "Config content:"
           cat "$CONFIG"
 
-      - name: Validate pmbootstrap configuration
+      - name: Validate configuration with pmbootstrap
         run: |
           CONFIG="$HOME/.config/pmbootstrap_v3.cfg"
 
@@ -126,61 +113,45 @@ jobs:
             -c "$CONFIG" \
             status
 
-      - name: Validate pmaports repository
+      - name: Validate pmaports
         run: |
           APORTS="$HOME/.local/var/pmbootstrap/cache_git/pmaports"
 
+          test -d "$APORTS"
           test -d "$APORTS/.git"
 
+          echo "pmaports repository:"
+          git -C "$APORTS" remote -v
+
+          echo
           echo "pmaports commit:"
           git -C "$APORTS" rev-parse HEAD
 
-          echo "pmaports branch:"
-          git -C "$APORTS" branch --show-current
-
-      - name: Validate Samsung SM-T500 device
-        run: |
-          APORTS="$HOME/.local/var/pmbootstrap/cache_git/pmaports"
-
-          echo "Searching for samsung-smt500..."
-
-          if find "$APORTS" -type f \
-            \( -name "deviceinfo" -o -name "APKBUILD" \) \
-            -print0 | xargs -0 grep -l "samsung-smt500" >/dev/null 2>&1; then
-
-            echo "Samsung SM-T500 references found."
-
-          elif find "$APORTS/device" -maxdepth 3 -type d \
-            -iname "*smt500*" | grep -q .; then
-
-            echo "Samsung SM-T500 device directory found."
-
-          else
-            echo "WARNING: samsung-smt500 was not found by the local search."
-            echo "pmbootstrap status will be used as the final configuration check."
-          fi
-
-      - name: Final configuration check
+      - name: Validate Samsung SM-T500
         run: |
           CONFIG="$HOME/.config/pmbootstrap_v3.cfg"
 
-          echo "======================================"
-          echo "FINAL PMBOOTSTRAP CONFIGURATION CHECK"
-          echo "======================================"
+          echo "Checking device with pmbootstrap..."
+
+          pmbootstrap \
+            -c "$CONFIG" \
+            deviceinfo_parse \
+            samsung-smt500
+
+      - name: Final status
+        run: |
+          CONFIG="$HOME/.config/pmbootstrap_v3.cfg"
+
+          echo
+          echo "================================"
+          echo "FINAL PMBOOTSTRAP STATUS"
+          echo "================================"
 
           pmbootstrap \
             -c "$CONFIG" \
             status
 
-          echo
-          echo "Config file:"
-          echo "$CONFIG"
-
-          echo
-          echo "Configuration:"
-          cat "$CONFIG"
-
-      - name: Copy config to artifact directory
+      - name: Prepare artifact
         run: |
           mkdir -p build-output
 
@@ -188,7 +159,10 @@ jobs:
             "$HOME/.config/pmbootstrap_v3.cfg" \
             build-output/pmbootstrap_v3.cfg
 
-      - name: Upload pmbootstrap configuration
+          echo "Artifact:"
+          cat build-output/pmbootstrap_v3.cfg
+
+      - name: Upload configuration
         uses: actions/upload-artifact@v4
         with:
           name: pmbootstrap-smt500-config
