@@ -29,15 +29,15 @@ jobs:
       - name: Verify pmbootstrap version
         run: pmbootstrap --version
 
-      - name: Update pmaports
-        run: pmbootstrap -c ".github/Con.ini" pull
-
-      - name: Verify pmbootstrap Status
-        run: pmbootstrap -c ".github/Con.ini" status
+      - name: Initialize pmbootstrap
+        run: |
+          mkdir -p ~/.config
+          cp .github/Con.ini ~/.config/pmbootstrap_v3.cfg
+          yes '' | pmbootstrap --details-to-stdout init
 
       - name: Build rootfs and system image
         run: |
-          pmbootstrap -c ".github/Con.ini" -y install \
+          pmbootstrap -y install \
             --password "github" \
             --no-sshd \
             --no-firewall
@@ -45,7 +45,7 @@ jobs:
       - name: Export OS image artifacts
         run: |
           mkdir -p build-output
-          pmbootstrap -c ".github/Con.ini" export build-output
+          pmbootstrap export build-output
 
       - name: Upload compiled OS artifact
         uses: actions/upload-artifact@v4
