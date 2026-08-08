@@ -24,6 +24,7 @@ jobs:
       - name: Install pmbootstrap from official git
         run: |
           python -m pip install --upgrade pip
+          # WICHTIG: Die exakte, vollständige Git-URL verwenden
           python -m pip install --user "git+https://postmarketos.org"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
