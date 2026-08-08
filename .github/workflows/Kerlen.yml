@@ -1,0 +1,60 @@
+---
+name: Build Droidian Kernel (gta4lwifi)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'droidian/**'
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git
+
+      - name: Clone kernel sources (LineageOS sm7125)
+        run: |
+          git clone \
+            --depth=1 \
+            --branch lineage-23.2 \
+            https://github.com/LineageOS/android_kernel_samsung_sm7125 \
+            kernel
+
+      - name: Apply Droidian packaging
+        run: |
+          cd kernel
+          git checkout -b droidian
+          cp -rv ../droidian/debian ./debian
+          mkdir -p droidian
+          cp -rv ../droidian/defconfig-fragments ./droidian/
+
+      - name: Build kernel in Docker
+        run: |
+          mkdir -p packages
+          docker run --rm \
+            -v "$PWD/packages:/buildd" \
+            -v "$PWD/kernel:/buildd/sources" \
+            quay.io/droidian/build-essential:trixie-amd64 \
+            bash -c '
+              set -e
+              cd /buildd/sources
+              apt-get install -y linux-packaging-snippets
+              rm -f debian/control
+              debian/rules debian/control
+              RELENG_HOST_ARCH="arm64" releng-build-package
+            '
+
+      - name: Upload kernel packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: droidian-kernel-gta4lwifi
+          path: packages/*.deb
+          if-no-files-found: error
