@@ -26,40 +26,27 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --user "git+https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          pmbootstrap --version
 
-      - name: Configure pmbootstrap
+      - name: Verify and Status pmbootstrap Config
         run: |
-          CONFIG_FILE="$HOME/.config/pmbootstrap_v3.cfg"
-          mkdir -p "$HOME/.config"
-
-          pmbootstrap -c "$CONFIG_FILE" -y config work "$HOME/.local/var/pmbootstrap"
-          pmbootstrap -c "$CONFIG_FILE" -y config device "samsung-smt500"
-          pmbootstrap -c "$CONFIG_FILE" -y config ui "phosh"
-          pmbootstrap -c "$CONFIG_FILE" -y config hostname "slim-os"
-          pmbootstrap -c "$CONFIG_FILE" -y config jobs "4"
-          pmbootstrap -c "$CONFIG_FILE" -y config build_default_device_arch "true"
-          pmbootstrap -c "$CONFIG_FILE" -y config is_default_channel "true"
-          pmbootstrap -c "$CONFIG_FILE" -y status
+          # Wir weisen pmbootstrap an, direkt deine Datei aus dem Repository zu nutzen
+          pmbootstrap -c ".github/Con.ini" status
 
       - name: Update pmaports
         run: |
-          CONFIG_FILE="$HOME/.config/pmbootstrap_v3.cfg"
-          pmbootstrap -c "$CONFIG_FILE" -y pull
+          pmbootstrap -c ".github/Con.ini" pull
 
       - name: Build rootfs and system image
         run: |
-          CONFIG_FILE="$HOME/.config/pmbootstrap_v3.cfg"
-          pmbootstrap -c "$CONFIG_FILE" -y install \
+          pmbootstrap -c ".github/Con.ini" -y install \
             --password "github" \
             --no-sshd \
             --no-firewall
 
       - name: Export OS image artifacts
         run: |
-          CONFIG_FILE="$HOME/.config/pmbootstrap_v3.cfg"
           mkdir -p build-output
-          pmbootstrap -c "$CONFIG_FILE" -y export build-output
+          pmbootstrap -c ".github/Con.ini" export build-output
 
       - name: Upload compiled OS artifact
         uses: actions/upload-artifact@v4
