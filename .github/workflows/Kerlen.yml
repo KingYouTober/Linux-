@@ -52,6 +52,12 @@ jobs:
           cat "$FRAGMENT" >> "$DEFCONFIG"
           echo "==> Fragment erfolgreich angewendet."
 
+      - name: Fix script permissions
+        run: |
+          find "$GITHUB_WORKSPACE/kernel/scripts" -name "*.sh" \
+            -exec chmod +x {} \;
+          echo "==> Skript-Rechte gesetzt."
+
       - name: Build kernel
         run: |
           cd "$GITHUB_WORKSPACE/kernel"
