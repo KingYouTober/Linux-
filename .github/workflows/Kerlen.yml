@@ -17,123 +17,134 @@ jobs:
           path: kernel
           fetch-depth: 1
 
-      - name: Install dependencies
+      - name: Checkout packaging files
+        uses: actions/checkout@v4
+        with:
+          path: packaging
+
+      - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            python3 make git cpio
+            python3 make git cpio wget unzip
 
-      - name: Install clang 8 (Samsung toolchain)
+      - name: Download Samsung clang 8 toolchain
         run: |
-          sudo apt-get install -y clang-8 lld-8
-          sudo ln -sf /usr/bin/clang-8 /usr/local/bin/clang
+          # Samsung nutzt intern Googles prebuilt clang aus dem AOSP-Toolchain-Repo
+          # clang-r346389c = clang 8.0.7, exakt die Version die Samsung nutzt
+          wget -q \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r346389c.tar.gz \
+            -O clang8.tar.gz || \
+          wget -q \
+            https://github.com/KingYouTober/Samsung_Galaxy_Tab_A7_GTA4LX_SM-T500-SM-T505_Kernel/releases/download/toolchain/clang-r346389c.tar.gz \
+            -O clang8.tar.gz || true
 
-      - name: Checkout Droidian packaging files
-        uses: actions/checkout@v4
-        with:
-          path: packaging
+          # Fallback: llvm.sh für eine kompatible clang-Version (12+)
+          if [ ! -s clang8.tar.gz ]; then
+            echo "Nutze clang-12 als Fallback (kompatibel mit Kernel 4.19)"
+            wget -qO- https://apt.llvm.org/llvm.sh | \
+              sudo bash -s 12 || true
+            sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang
+            CLANG_BIN=/usr/bin/clang-12
+          else
+            mkdir -p toolchain/clang8
+            tar -xzf clang8.tar.gz -C toolchain/clang8
+            CLANG_BIN="$(pwd)/toolchain/clang8/bin/clang"
+          fi
+          echo "CLANG_BIN=$CLANG_BIN" >> "$GITHUB_ENV"
 
       - name: Apply Halium config fragment
         run: |
           cd kernel
-          # Fragment an richtiger Stelle ablegen
-          cat ../packaging/droidian/defconfig-fragments/halium.config \
-            >> arch/arm64/configs/vendor/gta4lwifi_eur_open_defconfig
+          cat >> arch/arm64/configs/vendor/gta4lwifi_eur_open_defconfig \
+            < ../packaging/droidian/defconfig-fragments/halium.config
+          echo "Config-Fragment angewendet."
 
       - name: Build kernel
         run: |
           cd kernel
           mkdir -p out
-
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=clang-8
+          export CC="${CLANG_BIN}"
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KERNEL_MAKE_ENV="CONFIG_BUILD_ARM64_DT_OVERLAY=y"
 
-          # Config erzeugen
+          echo "==> Benutze Compiler: $CC"
+          $CC --version
+
+          # Defconfig
           make -j$(nproc) \
             O=out \
-            $KERNEL_MAKE_ENV \
             ARCH=arm64 \
             CROSS_COMPILE=$CROSS_COMPILE \
-            CC=$CC \
+            CC="$CC" \
             CLANG_TRIPLE=$CLANG_TRIPLE \
+            $KERNEL_MAKE_ENV \
             vendor/gta4lwifi_eur_open_defconfig
 
-          # Kernel kompilieren
+          # Kernel bauen
           make -j$(nproc) \
             O=out \
-            $KERNEL_MAKE_ENV \
             ARCH=arm64 \
             CROSS_COMPILE=$CROSS_COMPILE \
-            CC=$CC \
-            CLANG_TRIPLE=$CLANG_TRIPLE
+            CC="$CC" \
+            CLANG_TRIPLE=$CLANG_TRIPLE \
+            $KERNEL_MAKE_ENV
 
-      - name: Collect output artifacts
+      - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          # Kernel Image
-          cp kernel/out/arch/arm64/boot/Image.gz \
-            artifacts/ 2>/dev/null || \
-          cp kernel/out/arch/arm64/boot/Image \
-            artifacts/
-          # DTB(s)
+
+          # Kernel Image (probiere Image.gz zuerst, dann Image)
+          if [ -f kernel/out/arch/arm64/boot/Image.gz ]; then
+            cp kernel/out/arch/arm64/boot/Image.gz artifacts/
+          elif [ -f kernel/out/arch/arm64/boot/Image ]; then
+            cp kernel/out/arch/arm64/boot/Image artifacts/
+            gzip -k artifacts/Image
+            mv artifacts/Image.gz artifacts/Image.gz
+          fi
+
+          # DTBs
           find kernel/out/arch/arm64/boot/dts \
             -name "*.dtb" -exec cp {} artifacts/ \; 2>/dev/null || true
-          # Modulverzeichnis
+
+          # Kernel-Module
           find kernel/out -name "*.ko" \
             -exec cp {} artifacts/ \; 2>/dev/null || true
+
+          echo "==> Artifacts:"
           ls -lh artifacts/
 
-      - name: Build boot.img via mkbootimg
+      - name: Build boot.img
         run: |
-          sudo apt-get install -y python3-pip
-          pip3 install mkbootimg 2>/dev/null || \
-            sudo apt-get install -y android-sdk-libsparse-utils
+          pip3 install mkbootimg --quiet
 
-          # boot.img zusammenbauen
-          # (Ramdisk kommt später vom Droidian rootfs — hier erstmal leer)
-          cat /dev/null | gzip > /tmp/empty-ramdisk.gz
+          KERNEL_IMG="artifacts/Image.gz"
+          [ -f "$KERNEL_IMG" ] || KERNEL_IMG="artifacts/Image"
 
-          python3 - << 'PYEOF'
-          import subprocess, os
-          args = [
-            "mkbootimg",
-            "--kernel",    "artifacts/Image.gz",
-            "--ramdisk",   "/tmp/empty-ramdisk.gz",
-            "--cmdline",   (
-              "console=ttyMSM0,115200n8 "
-              "androidboot.hardware=qcom "
-              "androidboot.console=ttyMSM0 "
-              "androidboot.memcg=1 "
-              "lpm_levels.sleep_disabled=1 "
-              "video=vfb:640x400,bpp=32,memsize=3072000 "
-              "msm_rtb.filter=0x237 "
-              "service_locator.enable=1 "
-              "swiotlb=2048 loop.max_part=7 "
-              "androidboot.usbcontroller=a600000.dwc3 "
-              "console=tty0 droidian.lvm.prefer"
-            ),
-            "--base",       "0x00000000",
-            "--pagesize",   "4096",
-            "--kernel_offset",    "0x00008000",
-            "--ramdisk_offset",   "0x01000000",
-            "--tags_offset",      "0x00000100",
-            "--dtb_offset",       "0x01f00000",
-            "--header_version",   "2",
-            "--output",    "artifacts/boot.img",
-          ]
-          result = subprocess.run(args, capture_output=True, text=True)
-          print(result.stdout)
-          if result.returncode != 0:
-            print("FEHLER:", result.stderr)
-            exit(result.returncode)
-          PYEOF
+          # Leere Ramdisk (Droidian rootfs kommt in Phase 3)
+          printf '' | gzip > /tmp/empty-ramdisk.gz
 
-      - name: Upload kernel artifacts
+          mkbootimg \
+            --kernel     "$KERNEL_IMG" \
+            --ramdisk    "/tmp/empty-ramdisk.gz" \
+            --cmdline    "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
+            --base             0x00000000 \
+            --pagesize         4096 \
+            --kernel_offset    0x00008000 \
+            --ramdisk_offset   0x01000000 \
+            --tags_offset      0x00000100 \
+            --dtb_offset       0x01f00000 \
+            --header_version   2 \
+            --output           artifacts/boot.img
+
+          echo "==> boot.img erstellt:"
+          ls -lh artifacts/boot.img
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: droidian-kernel-gta4lwifi
