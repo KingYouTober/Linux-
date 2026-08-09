@@ -9,6 +9,11 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Checkout packaging files (Linux- repo)
+        uses: actions/checkout@v4
+        with:
+          path: packaging
+
       - name: Checkout Kernel repo
         uses: actions/checkout@v4
         with:
@@ -17,10 +22,17 @@ jobs:
           path: kernel
           fetch-depth: 1
 
-      - name: Checkout packaging files
-        uses: actions/checkout@v4
-        with:
-          path: packaging
+      - name: Debug — Verzeichnisstruktur prüfen
+        run: |
+          echo "=== Workspace ==="
+          ls -la $GITHUB_WORKSPACE
+          echo "=== packaging/ ==="
+          ls -la packaging/ || echo "packaging/ fehlt!"
+          echo "=== packaging/droidian/ ==="
+          ls -la packaging/droidian/ || echo "packaging/droidian/ fehlt!"
+          echo "=== defconfig-fragments ==="
+          ls -la packaging/droidian/defconfig-fragments/ \
+            || echo "defconfig-fragments/ fehlt!"
 
       - name: Install build dependencies
         run: |
@@ -30,108 +42,82 @@ jobs:
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             python3 make git cpio wget unzip
 
-      - name: Download Samsung clang 8 toolchain
+      - name: Install clang-12 (kompatibel mit Kernel 4.19)
         run: |
-          # Samsung nutzt intern Googles prebuilt clang aus dem AOSP-Toolchain-Repo
-          # clang-r346389c = clang 8.0.7, exakt die Version die Samsung nutzt
-          wget -q \
-            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r346389c.tar.gz \
-            -O clang8.tar.gz || \
-          wget -q \
-            https://github.com/KingYouTober/Samsung_Galaxy_Tab_A7_GTA4LX_SM-T500-SM-T505_Kernel/releases/download/toolchain/clang-r346389c.tar.gz \
-            -O clang8.tar.gz || true
-
-          # Fallback: llvm.sh für eine kompatible clang-Version (12+)
-          if [ ! -s clang8.tar.gz ]; then
-            echo "Nutze clang-12 als Fallback (kompatibel mit Kernel 4.19)"
-            wget -qO- https://apt.llvm.org/llvm.sh | \
-              sudo bash -s 12 || true
-            sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang
-            CLANG_BIN=/usr/bin/clang-12
-          else
-            mkdir -p toolchain/clang8
-            tar -xzf clang8.tar.gz -C toolchain/clang8
-            CLANG_BIN="$(pwd)/toolchain/clang8/bin/clang"
-          fi
-          echo "CLANG_BIN=$CLANG_BIN" >> "$GITHUB_ENV"
+          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s 12
+          sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang
+          clang --version
 
       - name: Apply Halium config fragment
         run: |
-          cd kernel
-          cat >> arch/arm64/configs/vendor/gta4lwifi_eur_open_defconfig \
-            < ../packaging/droidian/defconfig-fragments/halium.config
-          echo "Config-Fragment angewendet."
+          FRAGMENT="$GITHUB_WORKSPACE/packaging/droidian/defconfig-fragments/halium.config"
+          DEFCONFIG="$GITHUB_WORKSPACE/kernel/arch/arm64/configs/vendor/gta4lwifi_eur_open_defconfig"
+
+          echo "Fragment: $FRAGMENT"
+          echo "Defconfig: $DEFCONFIG"
+
+          if [ ! -f "$FRAGMENT" ]; then
+            echo "FEHLER: halium.config nicht gefunden!"
+            exit 1
+          fi
+          if [ ! -f "$DEFCONFIG" ]; then
+            echo "FEHLER: gta4lwifi_eur_open_defconfig nicht gefunden!"
+            echo "Verfügbare defconfigs:"
+            find "$GITHUB_WORKSPACE/kernel/arch/arm64/configs" -name "*.config" \
+              -o -name "*defconfig*" | sort
+            exit 1
+          fi
+
+          cat "$FRAGMENT" >> "$DEFCONFIG"
+          echo "==> Fragment erfolgreich angewendet."
 
       - name: Build kernel
         run: |
-          cd kernel
+          cd "$GITHUB_WORKSPACE/kernel"
           mkdir -p out
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC="${CLANG_BIN}"
+          export CC=clang-12
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KERNEL_MAKE_ENV="CONFIG_BUILD_ARM64_DT_OVERLAY=y"
 
-          echo "==> Benutze Compiler: $CC"
-          $CC --version
-
-          # Defconfig
           make -j$(nproc) \
-            O=out \
-            ARCH=arm64 \
+            O=out ARCH=arm64 \
             CROSS_COMPILE=$CROSS_COMPILE \
-            CC="$CC" \
-            CLANG_TRIPLE=$CLANG_TRIPLE \
+            CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
             $KERNEL_MAKE_ENV \
             vendor/gta4lwifi_eur_open_defconfig
 
-          # Kernel bauen
           make -j$(nproc) \
-            O=out \
-            ARCH=arm64 \
+            O=out ARCH=arm64 \
             CROSS_COMPILE=$CROSS_COMPILE \
-            CC="$CC" \
-            CLANG_TRIPLE=$CLANG_TRIPLE \
+            CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
             $KERNEL_MAKE_ENV
 
       - name: Collect artifacts
         run: |
           mkdir -p artifacts
+          BOOT="$GITHUB_WORKSPACE/kernel/out/arch/arm64/boot"
 
-          # Kernel Image (probiere Image.gz zuerst, dann Image)
-          if [ -f kernel/out/arch/arm64/boot/Image.gz ]; then
-            cp kernel/out/arch/arm64/boot/Image.gz artifacts/
-          elif [ -f kernel/out/arch/arm64/boot/Image ]; then
-            cp kernel/out/arch/arm64/boot/Image artifacts/
-            gzip -k artifacts/Image
-            mv artifacts/Image.gz artifacts/Image.gz
-          fi
-
-          # DTBs
-          find kernel/out/arch/arm64/boot/dts \
-            -name "*.dtb" -exec cp {} artifacts/ \; 2>/dev/null || true
-
-          # Kernel-Module
-          find kernel/out -name "*.ko" \
+          [ -f "$BOOT/Image.gz" ] && cp "$BOOT/Image.gz" artifacts/
+          [ -f "$BOOT/Image" ]    && cp "$BOOT/Image"    artifacts/
+          find "$BOOT/dts" -name "*.dtb" \
             -exec cp {} artifacts/ \; 2>/dev/null || true
-
-          echo "==> Artifacts:"
+          find "$GITHUB_WORKSPACE/kernel/out" -name "*.ko" \
+            -exec cp {} artifacts/ \; 2>/dev/null || true
           ls -lh artifacts/
 
       - name: Build boot.img
         run: |
           pip3 install mkbootimg --quiet
-
-          KERNEL_IMG="artifacts/Image.gz"
-          [ -f "$KERNEL_IMG" ] || KERNEL_IMG="artifacts/Image"
-
-          # Leere Ramdisk (Droidian rootfs kommt in Phase 3)
+          KERNEL_IMG=artifacts/Image.gz
+          [ -f "$KERNEL_IMG" ] || KERNEL_IMG=artifacts/Image
           printf '' | gzip > /tmp/empty-ramdisk.gz
 
           mkbootimg \
-            --kernel     "$KERNEL_IMG" \
-            --ramdisk    "/tmp/empty-ramdisk.gz" \
-            --cmdline    "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
+            --kernel   "$KERNEL_IMG" \
+            --ramdisk  /tmp/empty-ramdisk.gz \
+            --cmdline  "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
             --base             0x00000000 \
             --pagesize         4096 \
             --kernel_offset    0x00008000 \
@@ -141,7 +127,6 @@ jobs:
             --header_version   2 \
             --output           artifacts/boot.img
 
-          echo "==> boot.img erstellt:"
           ls -lh artifacts/boot.img
 
       - name: Upload artifacts
