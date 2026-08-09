@@ -29,7 +29,7 @@ jobs:
             bc bison flex libssl-dev libelf-dev \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             python3 make git cpio wget unzip \
-            clang-14 lld-14
+            clang-14 lld-14 mkbootimg
           clang-14 --version
 
       - name: Apply Halium config fragment
@@ -68,7 +68,6 @@ jobs:
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang-14 \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
             LD=ld.lld-14 \
             CONFIG_BUILD_ARM64_DT_OVERLAY=y \
             vendor/gta4lwifi_eur_open_defconfig
@@ -78,7 +77,6 @@ jobs:
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CC=clang-14 \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
             LD=ld.lld-14 \
             CONFIG_BUILD_ARM64_DT_OVERLAY=y
 
@@ -99,10 +97,15 @@ jobs:
 
       - name: Build boot.img
         run: |
-          pip3 install mkbootimg --quiet
-
           KERNEL_IMG="artifacts/Image.gz"
           [ -f "$KERNEL_IMG" ] || KERNEL_IMG="artifacts/Image"
+
+          # DTB-Datei für gta4lwifi (sm7125) ermitteln
+          DTB_FILE=$(find artifacts/ -name "*.dtb" | head -1)
+          if [ -z "$DTB_FILE" ]; then
+            echo "FEHLER: Keine .dtb-Datei in artifacts/ gefunden"
+            exit 1
+          fi
 
           printf '' | gzip > /tmp/empty-ramdisk.gz
 
@@ -115,6 +118,7 @@ jobs:
             --kernel_offset   0x00008000 \
             --ramdisk_offset  0x01000000 \
             --tags_offset     0x00000100 \
+            --dtb             "$DTB_FILE" \
             --dtb_offset      0x01f00000 \
             --header_version  2 \
             --output          artifacts/boot.img
