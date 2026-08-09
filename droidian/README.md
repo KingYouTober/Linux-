@@ -28,9 +28,10 @@ Die fertigen `.deb`-Pakete landen in `~/droidian/packages/`.
 
 ## Über GitHub Actions
 
-Der Workflow `.github/workflows/build-kernel.yml` baut den Kernel
-automatisch bei jedem Push auf Dateien unter `droidian/`.
-Die `.deb`-Pakete sind danach als Artifacts herunterladbar.
+Der Workflow `.github/workflows/Kerlen.yml` baut den Kernel
+automatisch bei manuellem Auslösen (workflow_dispatch).
+Die Kernel-Artefakte (Image, DTBs, Module, boot.img) sind
+danach als Artifacts herunterladbar.
 
 ## Verzeichnisstruktur
 
