@@ -28,13 +28,29 @@ fi
 
 # Droidian-Branch erstellen
 cd "$KERNEL_DIR"
-if ! git show-ref --quiet refs/heads/droidian; then
+if ! git show-ref --verify --quiet refs/heads/droidian; then
   echo "==> Droidian-Branch erstellen..."
   git checkout -b droidian
 else
   echo "==> Droidian-Branch existiert bereits."
   git checkout droidian
 fi
+
+# Prüfen ob debian-Verzeichnis im Repo vorhanden ist
+if [ ! -d "$REPO_DIR/droidian/debian" ]; then
+  echo "FEHLER: $REPO_DIR/droidian/debian nicht gefunden."
+  echo "Bitte das debian/-Verzeichnis mit kernel-info.mk, rules, compat und source/format anlegen."
+  exit 1
+fi
+
+# Packaging-Dateien aus dem Repo kopieren
+echo "==> Droidian-Packaging-Dateien einkopieren..."
+cp -rv "$REPO_DIR/droidian/debian" "$KERNEL_DIR/"
+cp -rv "$REPO_DIR/droidian/defconfig-fragments" "$KERNEL_DIR/droidian"
+
+echo ""
+echo "==> Fertig! Nächster Schritt: Docker-Build starten."
+echo "    Führe aus: bash $REPO_DIR/droidian/build.sh"fi
 
 # Packaging-Dateien aus dem Repo kopieren
 echo "==> Droidian-Packaging-Dateien einkopieren..."
