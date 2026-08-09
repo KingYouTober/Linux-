@@ -11,7 +11,6 @@
 
 .phosh-top-bar:hover {
   background-color: rgba(25, 30, 45, 1.0);
-  cursor: pointer;
 }
 
 /* Quick Settings Pull-Down Menu */
@@ -39,7 +38,6 @@
 .phosh-quick-setting:hover {
   background-color: #1e293b;
   border-color: #3b82f6;
-  cursor: pointer;
 }
 
 .phosh-quick-setting:active {
@@ -74,5 +72,4 @@
 
 .phosh-app-grid-button:hover {
   background-color: rgba(59, 130, 246, 0.15);
-  cursor: pointer;
 }
