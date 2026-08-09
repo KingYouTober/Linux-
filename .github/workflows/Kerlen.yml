@@ -3,58 +3,139 @@ name: Build Droidian Kernel (gta4lwifi)
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'droidian/**'
 
 jobs:
   build-kernel:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Kernel repo
         uses: actions/checkout@v4
+        with:
+          repository: KingYouTober/Samsung_Galaxy_Tab_A7_GTA4LX_SM-T500-SM-T505_Kernel
+          ref: SM-T500_EUR_QQ_Opensource
+          path: kernel
+          fetch-depth: 1
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git
+          sudo apt-get install -y \
+            bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            python3 make git cpio
 
-      - name: Clone kernel sources (LineageOS sm7125)
+      - name: Install clang 8 (Samsung toolchain)
         run: |
-          git clone \
-            --depth=1 \
-            --branch lineage-23.2 \
-            https://github.com/LineageOS/android_kernel_samsung_sm7125 \
-            kernel
+          sudo apt-get install -y clang-8 lld-8
+          sudo ln -sf /usr/bin/clang-8 /usr/local/bin/clang
 
-      - name: Apply Droidian packaging
+      - name: Checkout Droidian packaging files
+        uses: actions/checkout@v4
+        with:
+          path: packaging
+
+      - name: Apply Halium config fragment
         run: |
           cd kernel
-          git checkout -b droidian
-          cp -rv ../droidian/debian ./debian
-          mkdir -p droidian
-          cp -rv ../droidian/defconfig-fragments ./droidian/
+          # Fragment an richtiger Stelle ablegen
+          cat ../packaging/droidian/defconfig-fragments/halium.config \
+            >> arch/arm64/configs/vendor/gta4lwifi_eur_open_defconfig
 
-      - name: Build kernel in Docker
+      - name: Build kernel
         run: |
-          mkdir -p packages
-          docker run --rm \
-            -v "$PWD/packages:/buildd" \
-            -v "$PWD/kernel:/buildd/sources" \
-            quay.io/droidian/build-essential:trixie-amd64 \
-            bash -c '
-              set -e
-              cd /buildd/sources
-              apt-get install -y linux-packaging-snippets
-              rm -f debian/control
-              debian/rules debian/control
-              RELENG_HOST_ARCH="arm64" releng-build-package
-            '
+          cd kernel
+          mkdir -p out
 
-      - name: Upload kernel packages
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC=clang-8
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export KERNEL_MAKE_ENV="CONFIG_BUILD_ARM64_DT_OVERLAY=y"
+
+          # Config erzeugen
+          make -j$(nproc) \
+            O=out \
+            $KERNEL_MAKE_ENV \
+            ARCH=arm64 \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            CC=$CC \
+            CLANG_TRIPLE=$CLANG_TRIPLE \
+            vendor/gta4lwifi_eur_open_defconfig
+
+          # Kernel kompilieren
+          make -j$(nproc) \
+            O=out \
+            $KERNEL_MAKE_ENV \
+            ARCH=arm64 \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            CC=$CC \
+            CLANG_TRIPLE=$CLANG_TRIPLE
+
+      - name: Collect output artifacts
+        run: |
+          mkdir -p artifacts
+          # Kernel Image
+          cp kernel/out/arch/arm64/boot/Image.gz \
+            artifacts/ 2>/dev/null || \
+          cp kernel/out/arch/arm64/boot/Image \
+            artifacts/
+          # DTB(s)
+          find kernel/out/arch/arm64/boot/dts \
+            -name "*.dtb" -exec cp {} artifacts/ \; 2>/dev/null || true
+          # Modulverzeichnis
+          find kernel/out -name "*.ko" \
+            -exec cp {} artifacts/ \; 2>/dev/null || true
+          ls -lh artifacts/
+
+      - name: Build boot.img via mkbootimg
+        run: |
+          sudo apt-get install -y python3-pip
+          pip3 install mkbootimg 2>/dev/null || \
+            sudo apt-get install -y android-sdk-libsparse-utils
+
+          # boot.img zusammenbauen
+          # (Ramdisk kommt später vom Droidian rootfs — hier erstmal leer)
+          cat /dev/null | gzip > /tmp/empty-ramdisk.gz
+
+          python3 - << 'PYEOF'
+          import subprocess, os
+          args = [
+            "mkbootimg",
+            "--kernel",    "artifacts/Image.gz",
+            "--ramdisk",   "/tmp/empty-ramdisk.gz",
+            "--cmdline",   (
+              "console=ttyMSM0,115200n8 "
+              "androidboot.hardware=qcom "
+              "androidboot.console=ttyMSM0 "
+              "androidboot.memcg=1 "
+              "lpm_levels.sleep_disabled=1 "
+              "video=vfb:640x400,bpp=32,memsize=3072000 "
+              "msm_rtb.filter=0x237 "
+              "service_locator.enable=1 "
+              "swiotlb=2048 loop.max_part=7 "
+              "androidboot.usbcontroller=a600000.dwc3 "
+              "console=tty0 droidian.lvm.prefer"
+            ),
+            "--base",       "0x00000000",
+            "--pagesize",   "4096",
+            "--kernel_offset",    "0x00008000",
+            "--ramdisk_offset",   "0x01000000",
+            "--tags_offset",      "0x00000100",
+            "--dtb_offset",       "0x01f00000",
+            "--header_version",   "2",
+            "--output",    "artifacts/boot.img",
+          ]
+          result = subprocess.run(args, capture_output=True, text=True)
+          print(result.stdout)
+          if result.returncode != 0:
+            print("FEHLER:", result.stderr)
+            exit(result.returncode)
+          PYEOF
+
+      - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
           name: droidian-kernel-gta4lwifi
-          path: packages/*.deb
+          path: artifacts/
           if-no-files-found: error
