@@ -22,49 +22,30 @@ jobs:
           path: kernel
           fetch-depth: 1
 
-      - name: Debug — Verzeichnisstruktur prüfen
-        run: |
-          echo "=== Workspace ==="
-          ls -la $GITHUB_WORKSPACE
-          echo "=== packaging/ ==="
-          ls -la packaging/ || echo "packaging/ fehlt!"
-          echo "=== packaging/droidian/ ==="
-          ls -la packaging/droidian/ || echo "packaging/droidian/ fehlt!"
-          echo "=== defconfig-fragments ==="
-          ls -la packaging/droidian/defconfig-fragments/ \
-            || echo "defconfig-fragments/ fehlt!"
-
-      - name: Install build dependencies
+      - name: Install build dependencies + clang-14
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             bc bison flex libssl-dev libelf-dev \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            python3 make git cpio wget unzip
-
-      - name: Install clang-12 (kompatibel mit Kernel 4.19)
-        run: |
-          wget -qO- https://apt.llvm.org/llvm.sh | sudo bash -s 12
-          sudo ln -sf /usr/bin/clang-12 /usr/local/bin/clang
-          clang --version
+            python3 make git cpio wget unzip \
+            clang-14 lld-14
+          clang-14 --version
 
       - name: Apply Halium config fragment
         run: |
           FRAGMENT="$GITHUB_WORKSPACE/packaging/droidian/defconfig-fragments/halium.config"
           DEFCONFIG="$GITHUB_WORKSPACE/kernel/arch/arm64/configs/vendor/gta4lwifi_eur_open_defconfig"
 
-          echo "Fragment: $FRAGMENT"
-          echo "Defconfig: $DEFCONFIG"
-
           if [ ! -f "$FRAGMENT" ]; then
-            echo "FEHLER: halium.config nicht gefunden!"
+            echo "FEHLER: halium.config nicht gefunden unter $FRAGMENT"
             exit 1
           fi
           if [ ! -f "$DEFCONFIG" ]; then
-            echo "FEHLER: gta4lwifi_eur_open_defconfig nicht gefunden!"
-            echo "Verfügbare defconfigs:"
-            find "$GITHUB_WORKSPACE/kernel/arch/arm64/configs" -name "*.config" \
-              -o -name "*defconfig*" | sort
+            echo "FEHLER: defconfig nicht gefunden unter $DEFCONFIG"
+            echo "Vorhandene defconfigs:"
+            find "$GITHUB_WORKSPACE/kernel/arch/arm64/configs" \
+              -name "*defconfig*" | sort
             exit 1
           fi
 
@@ -75,24 +56,25 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/kernel"
           mkdir -p out
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=clang-12
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export KERNEL_MAKE_ENV="CONFIG_BUILD_ARM64_DT_OVERLAY=y"
 
           make -j$(nproc) \
-            O=out ARCH=arm64 \
-            CROSS_COMPILE=$CROSS_COMPILE \
-            CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
-            $KERNEL_MAKE_ENV \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=ld.lld-14 \
+            CONFIG_BUILD_ARM64_DT_OVERLAY=y \
             vendor/gta4lwifi_eur_open_defconfig
 
           make -j$(nproc) \
-            O=out ARCH=arm64 \
-            CROSS_COMPILE=$CROSS_COMPILE \
-            CC=$CC CLANG_TRIPLE=$CLANG_TRIPLE \
-            $KERNEL_MAKE_ENV
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang-14 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            LD=ld.lld-14 \
+            CONFIG_BUILD_ARM64_DT_OVERLAY=y
 
       - name: Collect artifacts
         run: |
@@ -101,31 +83,35 @@ jobs:
 
           [ -f "$BOOT/Image.gz" ] && cp "$BOOT/Image.gz" artifacts/
           [ -f "$BOOT/Image" ]    && cp "$BOOT/Image"    artifacts/
+
           find "$BOOT/dts" -name "*.dtb" \
             -exec cp {} artifacts/ \; 2>/dev/null || true
           find "$GITHUB_WORKSPACE/kernel/out" -name "*.ko" \
             -exec cp {} artifacts/ \; 2>/dev/null || true
+
           ls -lh artifacts/
 
       - name: Build boot.img
         run: |
           pip3 install mkbootimg --quiet
-          KERNEL_IMG=artifacts/Image.gz
-          [ -f "$KERNEL_IMG" ] || KERNEL_IMG=artifacts/Image
+
+          KERNEL_IMG="artifacts/Image.gz"
+          [ -f "$KERNEL_IMG" ] || KERNEL_IMG="artifacts/Image"
+
           printf '' | gzip > /tmp/empty-ramdisk.gz
 
           mkbootimg \
-            --kernel   "$KERNEL_IMG" \
-            --ramdisk  /tmp/empty-ramdisk.gz \
-            --cmdline  "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
-            --base             0x00000000 \
-            --pagesize         4096 \
-            --kernel_offset    0x00008000 \
-            --ramdisk_offset   0x01000000 \
-            --tags_offset      0x00000100 \
-            --dtb_offset       0x01f00000 \
-            --header_version   2 \
-            --output           artifacts/boot.img
+            --kernel          "$KERNEL_IMG" \
+            --ramdisk         /tmp/empty-ramdisk.gz \
+            --cmdline         "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
+            --base            0x00000000 \
+            --pagesize        4096 \
+            --kernel_offset   0x00008000 \
+            --ramdisk_offset  0x01000000 \
+            --tags_offset     0x00000100 \
+            --dtb_offset      0x01f00000 \
+            --header_version  2 \
+            --output          artifacts/boot.img
 
           ls -lh artifacts/boot.img
 
