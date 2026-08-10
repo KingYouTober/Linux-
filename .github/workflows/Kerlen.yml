@@ -5,24 +5,83 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-kernel:
+  # ─────────────────────────────────────────────────────────────
+  # JOB 1: Heribert-Kernel in dieses Repo synchronisieren
+  # Läuft einmalig; legt den Branch "kernel" an / aktualisiert ihn.
+  # ─────────────────────────────────────────────────────────────
+  sync-kernel:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout packaging files (Linux- repo)
+      - name: Checkout eigenes Repo (Linux-)
         uses: actions/checkout@v4
         with:
-          path: packaging
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout Kernel repo
+      - name: Heribert-Kernel als Remote hinzufügen & fetchen
+        run: |
+          git remote add heribert \
+            https://github.com/HeribertYavuz/android_kernel_samsung_gta4l.git \
+            || git remote set-url heribert \
+            https://github.com/HeribertYavuz/android_kernel_samsung_gta4l.git
+
+          git fetch heribert 14.0 --depth=1
+
+      - name: Branch "kernel" erstellen oder aktualisieren
+        run: |
+          # Existiert der Branch schon?
+          if git ls-remote --exit-code --heads origin kernel; then
+            echo "==> Branch 'kernel' existiert – wird aktualisiert"
+            git checkout kernel
+            git reset --hard heribert/14.0
+          else
+            echo "==> Branch 'kernel' wird neu erstellt"
+            git checkout -b kernel heribert/14.0
+          fi
+
+      - name: Packaging-Dateien aus main-Branch einkopieren
+        run: |
+          # Dateien aus dem main-Branch holen ohne Branch zu wechseln
+          git checkout origin/main -- \
+            droidian/defconfig-fragments/halium.config \
+            droidian/README.md \
+            configs/phosh.css \
+            .github/Con.ini \
+            || echo "Hinweis: Einige Packaging-Dateien noch nicht im main-Branch"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "==> Keine Änderungen – kein neuer Commit nötig"
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "chore: sync kernel from HeribertYavuz/android_kernel_samsung_gta4l@14.0"
+          fi
+
+      - name: Branch "kernel" pushen
+        run: |
+          git push origin kernel --force-with-lease
+          echo "==> Branch 'kernel' erfolgreich gepusht"
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 2: Kernel bauen (wartet auf sync-kernel)
+  # ─────────────────────────────────────────────────────────────
+  build-kernel:
+    runs-on: ubuntu-22.04
+    needs: sync-kernel
+
+    steps:
+      - name: Checkout kernel-Branch (der soeben synchronisierte)
         uses: actions/checkout@v4
         with:
-          repository: KingYouTober/Samsung_Galaxy_Tab_A7_GTA4LX_SM-T500-SM-T505_Kernel
-          ref: SM-T500_EUR_QQ_Opensource
-          path: kernel
+          ref: kernel
           fetch-depth: 1
 
-      - name: Install build dependencies + clang-14
+      - name: Build-Abhängigkeiten installieren
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -32,122 +91,86 @@ jobs:
             clang-14 lld-14 llvm-14 mkbootimg
           clang-14 --version
 
-      # Fix 1: yylloc-Mehrfachdefinition in scripts/dtc (GCC 10+ / Ubuntu 22.04)
-      # GCC 10 hat -fno-common als Standard; dtc-lexer.lex.c definiert yylloc
-      # doppelt. Lösung: Zeile aus der _shipped-Datei entfernen.
-      - name: Patch scripts/dtc yylloc (GCC 10+ fix)
+      - name: Halium config-Fragment anwenden
         run: |
-          LEXER="$GITHUB_WORKSPACE/kernel/scripts/dtc/dtc-lexer.lex.c_shipped"
-          if [ -f "$LEXER" ]; then
-            sed -i '/^YYLTYPE yylloc;/d' "$LEXER"
-            echo "==> yylloc-Patch angewendet auf $LEXER"
-          else
-            echo "WARNUNG: $LEXER nicht gefunden – kein Patch nötig"
-          fi
-
-      - name: Apply Halium config fragment
-        run: |
-          FRAGMENT="$GITHUB_WORKSPACE/packaging/droidian/defconfig-fragments/halium.config"
-          DEFCONFIG="$GITHUB_WORKSPACE/kernel/arch/arm64/configs/vendor/gta4lwifi_eur_open_defconfig"
+          FRAGMENT="droidian/defconfig-fragments/halium.config"
+          DEFCONFIG="arch/arm64/configs/gta4l_eur_open_defconfig"
 
           if [ ! -f "$FRAGMENT" ]; then
-            echo "FEHLER: halium.config nicht gefunden unter $FRAGMENT"
-            exit 1
+            echo "FEHLER: halium.config nicht gefunden"; exit 1
           fi
           if [ ! -f "$DEFCONFIG" ]; then
-            echo "FEHLER: defconfig nicht gefunden unter $DEFCONFIG"
-            echo "Vorhandene defconfigs:"
-            find "$GITHUB_WORKSPACE/kernel/arch/arm64/configs" \
-              -name "*defconfig*" | sort
+            echo "FEHLER: defconfig nicht gefunden"
+            find arch/arm64/configs -name "*defconfig*" | sort
             exit 1
           fi
 
           cat "$FRAGMENT" >> "$DEFCONFIG"
-          echo "==> Fragment erfolgreich angewendet."
+          echo "==> Fragment angewendet"
 
-      - name: Fix script permissions
-        run: |
-          find "$GITHUB_WORKSPACE/kernel/scripts" -name "*.sh" \
-            -exec chmod +x {} \;
-          echo "==> Skript-Rechte gesetzt."
+      - name: Skript-Rechte setzen
+        run: find scripts -name "*.sh" -exec chmod +x {} \;
 
-      # Fix 2: LLVM_IAS=1 aktiviert Clangs integrierten Assembler.
-      # Ohne dieses Flag ruft Clang den Host-Assembler (/usr/bin/as, x86_64)
-      # auf, der ARM-spezifische Flags wie -EL nicht kennt → Absturz.
-      # Mit LLVM_IAS=1 ist kein CROSS_COMPILE für den Assembler mehr nötig.
-      # AS=llvm-as-14 stellt sicher, dass das richtige LLVM-Tool verwendet wird.
-      - name: Build kernel
+      - name: Kernel bauen
         run: |
-          cd "$GITHUB_WORKSPACE/kernel"
           mkdir -p out
 
-          make -j$(nproc) \
-            O=out \
-            ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang-14 \
-            LD=ld.lld-14 \
-            AS=llvm-as-14 \
-            LLVM_IAS=1 \
-            CONFIG_BUILD_ARM64_DT_OVERLAY=y \
-            vendor/gta4lwifi_eur_open_defconfig
+          # LLVM_IAS=1: Clangs integrierten Assembler nutzen
+          # → kein externer ARM-Assembler nötig, kein -EL-Fehler
+          COMMON_FLAGS=(
+            ARCH=arm64
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CC=clang-14
+            LD=ld.lld-14
+            LLVM_IAS=1
+            O=out
+          )
 
-          make -j$(nproc) \
-            O=out \
-            ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CC=clang-14 \
-            LD=ld.lld-14 \
-            AS=llvm-as-14 \
-            LLVM_IAS=1 \
-            CONFIG_BUILD_ARM64_DT_OVERLAY=y
+          make -j$(nproc) "${COMMON_FLAGS[@]}" gta4l_eur_open_defconfig
+          make -j$(nproc) "${COMMON_FLAGS[@]}"
 
-      - name: Collect artifacts
+      - name: Artefakte einsammeln
         run: |
           mkdir -p artifacts
-          BOOT="$GITHUB_WORKSPACE/kernel/out/arch/arm64/boot"
+          BOOT="out/arch/arm64/boot"
 
           [ -f "$BOOT/Image.gz" ] && cp "$BOOT/Image.gz" artifacts/
           [ -f "$BOOT/Image" ]    && cp "$BOOT/Image"    artifacts/
 
-          find "$BOOT/dts" -name "*.dtb" \
-            -exec cp {} artifacts/ \; 2>/dev/null || true
-          find "$GITHUB_WORKSPACE/kernel/out" -name "*.ko" \
-            -exec cp {} artifacts/ \; 2>/dev/null || true
+          find "$BOOT/dts" -name "*.dtb" -exec cp {} artifacts/ \; 2>/dev/null || true
+          find out -name "*.ko"          -exec cp {} artifacts/ \; 2>/dev/null || true
 
           ls -lh artifacts/
 
-      - name: Build boot.img
+      - name: boot.img bauen
         run: |
           KERNEL_IMG="artifacts/Image.gz"
           [ -f "$KERNEL_IMG" ] || KERNEL_IMG="artifacts/Image"
 
-          # DTB-Datei für gta4lwifi (sm7125) ermitteln
           DTB_FILE=$(find artifacts/ -name "*.dtb" | head -1)
           if [ -z "$DTB_FILE" ]; then
-            echo "FEHLER: Keine .dtb-Datei in artifacts/ gefunden"
-            exit 1
+            echo "FEHLER: Keine DTB in artifacts/"; exit 1
           fi
 
           printf '' | gzip > /tmp/empty-ramdisk.gz
 
           mkbootimg \
-            --kernel          "$KERNEL_IMG" \
-            --ramdisk         /tmp/empty-ramdisk.gz \
-            --cmdline         "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
-            --base            0x00000000 \
-            --pagesize        4096 \
-            --kernel_offset   0x00008000 \
-            --ramdisk_offset  0x01000000 \
-            --tags_offset     0x00000100 \
-            --dtb             "$DTB_FILE" \
-            --dtb_offset      0x01f00000 \
-            --header_version  2 \
-            --output          artifacts/boot.img
+            --kernel         "$KERNEL_IMG" \
+            --ramdisk        /tmp/empty-ramdisk.gz \
+            --cmdline        "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
+            --base           0x00000000 \
+            --pagesize       4096 \
+            --kernel_offset  0x00008000 \
+            --ramdisk_offset 0x01000000 \
+            --tags_offset    0x00000100 \
+            --dtb            "$DTB_FILE" \
+            --dtb_offset     0x01f00000 \
+            --header_version 2 \
+            --output         artifacts/boot.img
 
           ls -lh artifacts/boot.img
 
-      - name: Upload artifacts
+      - name: Artefakte hochladen
         uses: actions/upload-artifact@v4
         with:
           name: droidian-kernel-gta4lwifi
