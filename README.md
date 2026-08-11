@@ -1,464 +1,244 @@
-# Droidian auf dem Samsung Galaxy Tab A7
+# Droidian – Samsung Galaxy Tab A7 Wi-Fi
 
-Linux-Setup für das **Samsung Galaxy Tab A7 (SM-T500 / gta4lwifi)** mit einer minimalistischen Oberfläche und nur den wichtigsten Anwendungen.
+**Droidian-Port für das Samsung Galaxy Tab A7 (SM-T500 / `gta4lwifi`)**
 
-## 🎯 Ziel des Projekts
-
-Das Ziel ist ein möglichst einfaches und aufgeräumtes Linux-System auf dem Galaxy Tab A7.
-
-Nach der Installation soll das Tablet hauptsächlich folgende Apps enthalten:
-
-* 💬 **Signal** – über Axolotl
-* 🟢 **WhatsApp** – als Chromium-Web-App
-* ⚙️ **Einstellungen**
-* 💻 **Terminal** – über `foot`
-
-Zusätzlich wird die Oberfläche angepasst:
-
-* dunkles Phosh-Design
-* schwarzer Hintergrund
-* möglichst wenige sichtbare System-Apps
-* minimalistischer Bootscreen
-* automatisierte Ersteinrichtung über `install.sh`
+> ⚠️ **Projektstatus: Experimental / eigener Port**
+>
+> Das SM-T500 wird derzeit **nicht offiziell von Droidian unterstützt**. Ziel dieses Projekts ist es, Droidian selbst für das `gta4lwifi` zu portieren.
 
 ---
 
-# 📁 Repository-Struktur
+## 🎯 Projektziel
 
-Die wichtigsten Dateien und Ordner im Repository:
+Minimalistisches Linux-System auf dem **Samsung Galaxy Tab A7 Wi-Fi** als Testgerät.
 
-```text
+| Eigenschaft | Wert |
+|---|---|
+| Modell | `SM-T500` |
+| Codename | `gta4lwifi` |
+| SoC | Qualcomm SM7125 / Snapdragon 662 |
+| Architektur | ARM64 |
+| Kernel | 4.19.315 (HeribertYavuz) |
+| Halium-Basis | Halium 12 |
+| Oberfläche | Phosh |
+| Linux-System | Droidian |
+
+**Geplante Apps:**
+- 💬 Signal (via Axolotl)
+- 🟢 WhatsApp (als Web-App / PWA)
+- ⚙️ Einstellungen (WLAN, Bluetooth)
+- 💻 Terminal
+- 🌑 Dunkles minimalistisches Design
+- 🚀 Minimalistischer Bootscreen
+
+---
+
+## 📁 Repository-Struktur
+
+```
 Linux-/
-├── install.sh
-│   └── Automatische Ersteinrichtung nach der Installation
+│
+├── README.md
+├── install.sh                          ← Oberfläche einrichten (nach erstem Boot)
 │
 ├── configs/
-│   └── phosh.css
-│       └── Dunkles GTK-/Phosh-Theme
+│   └── phosh.css                       ← Dunkles Phosh-Theme
 │
 ├── droidian/
-│   ├── build.sh
-│   │   └── Optionaler lokaler Docker-Build
-│   │
-│   ├── setup.sh
-│   │   └── Optionales Skript zum Vorbereiten des Kernel-Repositories
-│   │
+│   ├── build.sh                        ← Lokaler Build
+│   ├── setup.sh                        ← Build-Umgebung vorbereiten
+│   ├── README.md                       ← Kernel-Build Doku
 │   └── defconfig-fragments/
-│       └── halium.config
-│           └── Zusätzliche Kernel-Konfiguration für Droidian
+│       └── halium.config               ← Halium/Droidian Kernel-Optionen
 │
-├── .github/
-│   ├── Con.ini
-│   │   └── pmbootstrap-Konfiguration
-│   │
-│   └── workflows/
-│       └── Kerlen.yml
-│           └── GitHub-Actions-Workflow zum Bauen des Kernels
+└── .github/
+    ├── Con.ini                         ← Build-Konfiguration
+    └── workflows/
+        └── Kerlen.yml                  ← GitHub Actions Kernel-Build
 ```
 
-Die meisten Nutzer müssen nur mit **GitHub Actions**, **`boot.img`** und anschließend **`install.sh`** arbeiten. Die Dateien unter `droidian/` sind hauptsächlich für den Build-Prozess gedacht.
+> **Branch `kernel`** enthält den vollständigen Kernel-Source (automatisch von GitHub Actions aus [HeribertYavuz/android_kernel_samsung_gta4l](https://github.com/HeribertYavuz/android_kernel_samsung_gta4l) synchronisiert). Nicht manuell bearbeiten.
 
 ---
 
-# 🔨 Phase 1 – Kernel bauen
+## ⚠️ Wichtig: Kein TWRP für das SM-T500
 
-Der benötigte Kernel wird automatisch über **GitHub Actions** gebaut.
+Das SM-T500 ist kein normales Fastboot-Gerät. Es gibt **kein offizielles TWRP** für dieses Gerät.
 
-Der Workflow befindet sich hier:
+Der Flash-Weg läuft über **Samsung Download Mode** (Heimdall oder Odin):
 
-```text
-.github/workflows/Kerlen.yml
+```
+Samsung Download Mode
+        │
+        ▼
+VBMeta / AVB deaktivieren
+        │
+        ▼
+boot.img flashen (Droidian-Kernel)
+        │
+        ▼
+Droidian Rootfs
+        │
+        ▼
+Halium Android Container
+        │
+        ▼
+Phosh
 ```
 
-## GitHub Actions starten
-
-1. Öffne das GitHub-Repository.
-2. Gehe zu **Actions**.
-3. Wähle den Workflow **Build Droidian Kernel (gta4lwifi)**.
-4. Klicke auf **Run workflow**.
-5. Warte, bis der Build erfolgreich abgeschlossen wurde.
-
-Nach einem erfolgreichen Build wird ein Artifact erstellt.
-
-Typischer Inhalt:
-
-```text
-artifacts/
-├── Image.gz
-├── *.dtb
-├── boot.img
-└── *.ko
-```
-
-### Bedeutung der Dateien
-
-| Datei      | Bedeutung                            |
-| ---------- | ------------------------------------ |
-| `Image.gz` | Komprimierter Linux-Kernel           |
-| `*.dtb`    | Device-Tree-Dateien für die Hardware |
-| `boot.img` | Fertiges Android/Linux-Boot-Image    |
-| `*.ko`     | Zusätzliche Kernel-Module            |
-
-Für die Installation wird hauptsächlich die Datei **`boot.img`** benötigt.
-
-> **Wichtig:** Nach dem Build das entsprechende `artifacts.zip` herunterladen und auf dem PC entpacken.
+Der genaue Flash-Ablauf wird erst festgelegt wenn der Port vollständig gebaut ist.
 
 ---
 
-# 💻 Phase 2 – Tablet vorbereiten
+## 🏗️ Entwicklungsstand
 
-## Voraussetzungen
+| Schritt | Aufgabe | Status |
+|---|---|---|
+| 1 | SM-T500 Kernel-Quellen beschaffen | ✅ |
+| 2 | Kernel-Bugs fixen (LLVM_IAS, yylloc, P85946 DTBO) | ✅ |
+| 3 | Halium-Kernel-Optionen (halium.config) | ✅ |
+| 4 | GitHub Actions Build-Workflow | ✅ |
+| 5 | Kernel bauen | 🔨 |
+| 6 | boot.img testen (Samsung Download Mode) | ⏳ |
+| 7 | Droidian Adaptation Package erstellen | ⏳ |
+| 8 | Droidian Rootfs integrieren | ⏳ |
+| 9 | Erster Droidian-Boot | ⏳ |
+| 10 | Hardware testen (WLAN, Touch, Audio) | ⏳ |
+| 11 | Phosh konfigurieren | ⏳ |
+| 12 | Signal, WhatsApp, Terminal installieren | ⏳ |
+| 13 | Minimalistische Oberfläche | 🔜 |
 
-Für die Installation wird ein Linux-/Ubuntu-PC empfohlen.
+---
 
-Installiere zunächst ADB und Fastboot:
+## 🔧 Kernel
 
+### Kernel-Quelle
+
+Wir verwenden [HeribertYavuz/android_kernel_samsung_gta4l](https://github.com/HeribertYavuz/android_kernel_samsung_gta4l) (Branch `14.0`, Kernel **4.19.315**) statt des originalen Samsung-Quellcodes (4.19.81) weil:
+
+- 234 LTS-Patchlevel mehr (mehr Security-Fixes)
+- Alle Build-Bugs bereits gefixt (LLVM_IAS, `empty.o` HOSTCC, `--prefix notdir`)
+- EROFS-Support aktiviert
+- Kompiliert sauber mit Clang 14 + LLVM_IAS=1
+
+### Kernel bauen (GitHub Actions)
+
+Der Workflow wird manuell ausgelöst:
+
+**Actions → Build Droidian Kernel (gta4lwifi) → Run workflow**
+
+Zwei Optionen beim Start:
+- `sync: false` (Standard) — direkt bauen mit dem vorhandenen `kernel`-Branch (~20min, ab 2. Run ~5min via ccache)
+- `sync: true` — Kernel zuerst von Heribert neu synchronisieren, dann bauen
+
+**Ergebnis:** `boot.img`, `Image.gz`, DTBs und Module als herunterladbare Artifacts.
+
+### Behobene Build-Fehler
+
+| Fehler | Ursache | Fix |
+|---|---|---|
+| `/usr/bin/as: unrecognized option '-EL'` | Clang nutzte x86-Host-Assembler | `LLVM_IAS=1` |
+| `multiple definition of 'yylloc'` | GCC 10+ `-fno-common` Standard | Im Heribert-Repo bereits gefixt |
+| `empty.o` mit CC statt HOSTCC | Samsung Makefile-Bug | Im Heribert-Repo bereits gefixt |
+| `P85946-qrd-overlay: Assertion 'generate_fixups' failed` | Kaputte DTB eines anderen Geräts | Im Workflow via `sed` entfernt |
+
+### Halium Kernel-Optionen (`halium.config`)
+
+Wichtigste Optionen die zum Standard-Defconfig hinzugefügt werden:
+
+```
+CONFIG_DEVTMPFS=y
+CONFIG_VT=y
+CONFIG_NAMESPACES=y
+CONFIG_OVERLAY_FS=y
+CONFIG_IKCONFIG=y
+CONFIG_AUDIT=y
+CONFIG_ANDROID_PARANOID_NETWORK=n
+CONFIG_ANDROID_BINDERFS=n
+CONFIG_SW_SYNC=y
+```
+
+---
+
+## 🧩 Bekannter Halium-Unterbau
+
+Für das SM-T500 existiert ein Community-Port:
+
+```
+Ubuntu Touch 24.04
+      │
+      └── Halium 12
+            │
+            └── LineageOS 19.1 / Android 12
+```
+
+Laut aktuellem Portstatus funktionieren bereits:
+- ✅ Boot
+- ✅ Touchscreen
+- ✅ WLAN
+- ✅ Lautsprecher
+- ✅ Lautstärketasten
+- 🟡 Bluetooth (noch nicht vollständig)
+- 🟡 Kamera (noch nicht vollständig)
+
+Dieser Halium-12-Unterbau ist die Basis für den Droidian-Port.
+
+---
+
+## 🖥️ Geplante Oberfläche
+
+```
+┌─────────────────────────────┐
+│  Phosh – minimalistisch     │
+│                             │
+│   💬  Signal                │
+│   🟢  WhatsApp              │
+│   ⚙️  Einstellungen         │
+│   💻  Terminal              │
+│                             │
+└─────────────────────────────┘
+```
+
+- **Signal** → Axolotl (nativer Linux-Phone-Client)
+- **WhatsApp** → Chromium PWA (`--app=https://web.whatsapp.com`)
+- **Einstellungen** → GNOME Control Center (WLAN, Bluetooth, Display)
+- **Terminal** → foot (leichtgewichtiges Wayland-Terminal)
+- **Theme** → `configs/phosh.css` (dunkel, blaue Akzente)
+
+---
+
+## 🔐 Samsung VBMeta / AVB
+
+Das SM-T500 verwendet Samsungs Verified Boot. Für den Custom-Port muss VBMeta deaktiviert werden. Die konkrete `vbmeta.img` muss immer zur verwendeten Halium-Basis passen — keine generische Datei verwenden.
+
+---
+
+## 🐞 Debugging
+
+### Halium-Container prüfen
 ```bash
-sudo apt update
-sudo apt install adb fastboot
+lxc-ls --fancy
 ```
 
-Prüfe anschließend, ob die Programme installiert wurden:
-
+### Container-Logs
 ```bash
-adb --version
-fastboot --version
+lxc-start -n android --logfile=/tmp/lxclog --logpriority=DEBUG
 ```
 
----
-
-## 🔓 Entwickleroptionen aktivieren
-
-Auf dem Galaxy Tab A7 müssen die Entwickleroptionen und die USB-Debugging-Funktion aktiviert werden.
-
-### 1. Entwickleroptionen aktivieren
-
-Auf dem Tablet:
-
-**Einstellungen → Über das Tablet → Softwareinformationen**
-
-Danach etwa **7-mal auf „Buildnummer“** tippen.
-
-Android zeigt anschließend an, dass die Entwickleroptionen aktiviert wurden.
-
-### 2. Benötigte Optionen aktivieren
-
-Öffne:
-
-**Einstellungen → Entwickleroptionen**
-
-Aktiviere:
-
-* **OEM-Entsperrung**
-* **USB-Debugging**
-
-> ⚠️ Das Entsperren des Bootloaders kann einen Werksreset auslösen und dabei alle Daten auf dem Tablet löschen. Sichere wichtige Daten vorher.
-
----
-
-# 🛠️ TWRP
-
-Für die weiteren Installationsschritte wird **TWRP** verwendet.
-
-Offizielle TWRP-Seite:
-
-https://twrp.me/samsung/samsunggalaxytaba72020wifi.html
-
-Lade die passende TWRP-Datei für das **Samsung Galaxy Tab A7 WiFi / SM-T500 / gta4lwifi** herunter.
-
-Lege die Datei anschließend beispielsweise als:
-
-```text
-twrp-gta4lwifi.img
-```
-
-in deinen aktuellen Arbeitsordner.
-
----
-
-# ⚡ Tablet in den benötigten Modus starten
-
-Verbinde das Tablet mit dem PC und starte es in den Bootloader/Fastboot-Modus.
-
-Anschließend kann TWRP je nach unterstütztem Bootloader-Verfahren gestartet werden.
-
-Beispiel:
-
+### Kernel-Logs nach Absturz (Pstore)
 ```bash
-fastboot boot twrp-gta4lwifi.img
-```
-
-### ⚠️ Wichtig
-
-Dieser Befehl versucht, TWRP **temporär zu starten**, anstatt TWRP dauerhaft als Recovery zu installieren.
-
-Welche Bootloader-/Recovery-Methode auf deinem SM-T500 tatsächlich unterstützt wird, hängt von der verwendeten Firmware und dem aktuellen Gerätestand ab. Bei Problemen deshalb nicht einfach weitere Images flashen, sondern zuerst den genauen Fastboot-/Download-Mode des Geräts prüfen.
-
----
-
-# 📦 Phase 3 – Droidian installieren
-
-Jetzt werden das eigene Kernel-Image und das Droidian-Rootfs installiert.
-
-## 1. Droidian Rootfs herunterladen
-
-Das verwendete Rootfs kann aus dem offiziellen Droidian-Release heruntergeladen werden:
-
-```bash
-wget https://github.com/droidian-images/rootfs-api29gsi-all/releases/latest/download/droidian-ROOTFS-arm64.zip
-```
-
-Die Datei ist für **ARM64-Geräte** gedacht, was zum Galaxy Tab A7 passt.
-
----
-
-## 2. Eigenes `boot.img` flashen
-
-Nachdem das Artifact aus GitHub Actions entpackt wurde:
-
-```bash
-fastboot flash boot artifacts/boot.img
-```
-
-Dabei wird das zuvor gebaute Boot-Image auf die Boot-Partition des Tablets geschrieben.
-
-> ⚠️ Vergewissere dich unbedingt, dass `artifacts/boot.img` tatsächlich für das **SM-T500 / gta4lwifi** gebaut wurde. Ein falsches Boot-Image kann dazu führen, dass das Gerät nicht mehr normal startet.
-
----
-
-## 3. Droidian-Rootfs über TWRP installieren
-
-Starte TWRP und wähle:
-
-```text
-Install
-```
-
-Danach:
-
-```text
-droidian-ROOTFS-arm64.zip
-```
-
-auswählen und den Flash-Vorgang bestätigen.
-
-Nach erfolgreicher Installation:
-
-```text
-Reboot → System
-```
-
-Beim ersten Start kann der Bootvorgang länger dauern als gewöhnlich.
-
----
-
-# 🔐 Standard-Zugangsdaten
-
-Nach erfolgreicher Installation wird zunächst der Standardbenutzer verwendet:
-
-```text
-Benutzer: droidian
-Passwort: 1234
-```
-
-> ⚠️ Ändere das Passwort nach der ersten Anmeldung möglichst zeitnah.
-
----
-
-# 🧰 Phase 4 – Ersteinrichtung mit `install.sh`
-
-Nach dem ersten Start wird das System mit dem Script
-
-```text
-install.sh
-```
-
-automatisch eingerichtet.
-
-Das Script übernimmt einen großen Teil der Konfiguration, sodass nicht alle Einstellungen manuell vorgenommen werden müssen.
-
----
-
-## 🔌 SSH über USB verwenden
-
-Zuerst wird vom PC eine Weiterleitung von TCP-Port `2222` zum SSH-Port des Tablets eingerichtet:
-
-```bash
-adb forward tcp:2222 tcp:22
-```
-
-Danach kannst du dich per SSH verbinden:
-
-```bash
-ssh -p 2222 droidian@localhost
-```
-
-Passwort:
-
-```text
-1234
+ls /sys/fs/pstore
 ```
 
 ---
 
-## ⬇️ `install.sh` herunterladen
+## 📚 Quellen
 
-Im Droidian-System:
-
-```bash
-wget https://raw.githubusercontent.com/KingYouTober/Linux-/main/install.sh
-```
-
-Danach das Script mit Root-Rechten starten:
-
-```bash
-sudo bash install.sh
-```
-
-Nach erfolgreicher Einrichtung:
-
-```bash
-sudo reboot
-```
-
----
-
-# ⚙️ Was macht `install.sh`?
-
-Das Script übernimmt automatisch mehrere Einrichtungsschritte.
-
-### 🔄 System aktualisieren
-
-Das installierte System wird zuerst aktualisiert, damit die benötigten Pakete möglichst auf dem aktuellen Stand sind.
-
-### 📶 WLAN einrichten
-
-Das Script fragt interaktiv nach:
-
-```text
-SSID:
-Passwort:
-```
-
-Die eingegebenen Daten werden zur WLAN-Konfiguration verwendet.
-
-### 💬 Signal installieren
-
-Signal wird über **Axolotl** eingerichtet.
-
-### 🟢 WhatsApp installieren
-
-WhatsApp wird als **Chromium-PWA** eingerichtet.
-
-Dadurch erscheint WhatsApp wie eine normale Anwendung im App-Drawer.
-
-### 💻 Terminal installieren
-
-Als minimalistisches Terminal wird:
-
-```text
-foot
-```
-
-installiert.
-
-### ⚙️ Einstellungen installieren
-
-Die benötigte GNOME-/GTK-Einstellungsoberfläche wird eingerichtet.
-
-### 🎨 Phosh anpassen
-
-Die Datei:
-
-```text
-configs/phosh.css
-```
-
-wird verwendet, um Phosh optisch anzupassen.
-
-Dabei wird ein dunkleres/minimalistisches Erscheinungsbild verwendet.
-
-### 🏠 Homescreen aufräumen
-
-Nicht benötigte System-Apps werden nach Möglichkeit aus der sichtbaren Oberfläche ausgeblendet.
-
-Ziel ist ein möglichst einfacher App-Drawer mit hauptsächlich:
-
-```text
-Signal
-WhatsApp
-Einstellungen
-Terminal
-```
-
-### 🌑 Hintergrund
-
-Der Hintergrund wird auf einen sehr dunklen Farbwert gesetzt:
-
-```text
-#0a0a0a
-```
-
-### 🚀 Bootscreen
-
-Der Plymouth-Bootscreen wird auf ein möglichst minimalistisches Erscheinungsbild angepasst.
-
----
-
-# 🔄 Phase 5 – Nach dem Neustart
-
-Nach dem Reboot sollte das Tablet mit der eingerichteten Phosh-Oberfläche starten.
-
-Die wichtigsten Apps befinden sich anschließend im App-Drawer.
-
-| Anwendung        | Start                          |
-| ---------------- | ------------------------------ |
-| 💬 Signal        | App-Drawer → **Axolotl**       |
-| 🟢 WhatsApp      | App-Drawer → **WhatsApp**      |
-| 💻 Terminal      | App-Drawer → **foot**          |
-| ⚙️ Einstellungen | App-Drawer → **Einstellungen** |
-
-## WhatsApp verbinden
-
-Beim ersten Start von WhatsApp wird ein QR-Code angezeigt.
-
-Diesen QR-Code kannst du mit dem bereits verwendeten WhatsApp-Konto über dein Smartphone verknüpfen.
-
----
-
-# 👻 Weitere Apps ausblenden
-
-Falls nach der Installation noch eine nicht benötigte Anwendung sichtbar ist, kann deren Desktop-Datei für den Benutzer ausgeblendet werden.
-
-Beispiel:
-
-```bash
-echo -e '[Desktop Entry]\nHidden=true' \
-> ~/.local/share/applications/APPNAME.desktop
-```
-
-Dabei muss:
-
-```text
-APPNAME.desktop
-```
-
-durch den tatsächlichen Dateinamen der Anwendung ersetzt werden.
-
----
-
-# 🧪 Fehlerbehebung
-
-## Tablet startet nicht
-
-Prüfe zunächst:
-
-* Wurde das richtige `boot.img` verwendet?
-* Wurde das Image für **SM-T500 / gta4lwifi** gebaut?
-* Wurde der Flash-Vorgang ohne Fehler abgeschlossen?
-* Kann das Gerät noch in den Bootloader-/Recovery-Modus gestartet werden?
-
-Nicht mehrere unbekannte Images nacheinander flashen, ohne vorher die verwendete Partition und Firmware zu prüfen.
+- **Droidian Porting Guide:** https://docs.droidian.org/porting-guide/
+- **Droidian Kernel Compilation:** https://docs.droidian.org/porting-guide/kernel-compilation/
+- **Kernel-Quelle (Heribert):** https://github.com/HeribertYavuz/android_kernel_samsung_gta4l
+- **postmarketOS Device Wiki:** https://wiki.postmarketos.org/wiki/Samsung_Galaxy_Tab_A7_(samsung-gta4lwifi)
+- **Ubuntu Touch Community-Port:** https://sourceforge.net/projects/ubuntu-touch-galaxy-tab-a7/erwendete Partition und Firmware zu prüfen.
 
 ---
 
