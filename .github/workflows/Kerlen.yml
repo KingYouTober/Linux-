@@ -3,38 +3,190 @@ name: Build Droidian Kernel (gta4lwifi)
 
 on:
   workflow_dispatch:
+    inputs:
+      sync:
+        description: 'Kernel von Heribert neu synchronisieren?'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 jobs:
   # ─────────────────────────────────────────────────────────────
-  # JOB 1: Heribert-Kernel in dieses Repo synchronisieren
-  # Verwendet einen vollständigen (non-shallow) Clone damit
-  # GitHub den Push nicht mit "did not receive expected object"
-  # ablehnt. Der Kernel landet als Branch "kernel".
+  # JOB 1: Sync – nur wenn "sync: true" oder Branch fehlt
+  # Läuft NICHT bei jedem Build – nur auf Anfrage
   # ─────────────────────────────────────────────────────────────
   sync-kernel:
-    runs-on: self-hosted
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
+    # Nur ausführen wenn explizit angefordert ODER Branch existiert noch nicht
+    if: ${{ github.event.inputs.sync == 'true' }}
 
     steps:
-      - name: Checkout eigenes Repo (Linux-)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0          # vollständig – kein shallow clone
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Heribert-Kernel vollständig klonen
         run: |
-          # KEIN --depth=1 – shallow clone → "did not receive expected object"
           git clone \
             https://github.com/HeribertYavuz/android_kernel_samsung_gta4l.git \
             /tmp/heribert-kernel
-          echo "==> Heribert-Kernel geklont"
+          echo "==> Geklont"
 
-      - name: Branch "kernel" aus Heribert erstellen / aktualisieren
+      - name: Checkout eigenes Repo (für Packaging-Dateien)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: packaging
+
+      - name: Packaging-Dateien einkopieren
         run: |
           cd /tmp/heribert-kernel
+          for f in \
+            droidian/defconfig-fragments/halium.config \
+            droidian/README.md \
+            configs/phosh.css \
+            .github/Con.ini; do
+            if [ -f "$GITHUB_WORKSPACE/packaging/$f" ]; then
+              mkdir -p "$(dirname $f)"
+              cp "$GITHUB_WORKSPACE/packaging/$f" "$f"
+            fi
+          done
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || \
+            git commit -m "chore: add Droidian packaging files"
 
+      - name: Branch "kernel" pushen
+        run: |
+          cd /tmp/heribert-kernel
+          git remote add target \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/KingYouTober/Linux-.git
+          git push target 14.0:refs/heads/kernel --force
+          echo "==> Branch 'kernel' gepusht"
+
+  # ─────────────────────────────────────────────────────────────
+  # JOB 2: Build – läuft IMMER, nutzt bestehenden kernel-Branch
+  # ccache sorgt dafür dass ab dem 2. Run nur geänderte Dateien
+  # neu kompiliert werden (~5min statt ~20min)
+  # ─────────────────────────────────────────────────────────────
+  build-kernel:
+    runs-on: ubuntu-22.04
+    needs: [sync-kernel]
+    if: ${{ always() && !failure() }}
+
+    steps:
+      - name: Checkout kernel-Branch
+        uses: actions/checkout@v4
+        with:
+          ref: kernel
+          fetch-depth: 1
+
+      - name: Build-Abhängigkeiten installieren
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison flex libssl-dev libelf-dev \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            python3 make git cpio wget unzip \
+            clang-14 lld-14 llvm-14 mkbootimg ccache
+
+      # ccache speichert Compiler-Output zwischen Runs
+      # Zweiter Run: nur geänderte .c-Dateien werden neu kompiliert
+      - name: ccache einrichten
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-gta4lwifi-${{ github.sha }}
+          restore-keys: ccache-gta4lwifi-
+
+      - name: ccache konfigurieren
+        run: |
+          ccache --max-size=5G
+          ccache --zero-stats
+          echo "/usr/lib/ccache" >> $GITHUB_PATH
+
+      - name: Halium config-Fragment anwenden
+        run: |
+          FRAGMENT="droidian/defconfig-fragments/halium.config"
+          DEFCONFIG="arch/arm64/configs/gta4l_eur_open_defconfig"
+          if [ ! -f "$FRAGMENT" ]; then
+            echo "FEHLER: halium.config nicht gefunden"; exit 1
+          fi
+          if [ ! -f "$DEFCONFIG" ]; then
+            echo "FEHLER: defconfig nicht gefunden"
+            find arch/arm64/configs -name "*defconfig*" | sort
+            exit 1
+          fi
+          cat "$FRAGMENT" >> "$DEFCONFIG"
+          echo "==> Fragment angewendet"
+
+      - name: Skript-Rechte setzen
+        run: find scripts -name "*.sh" -exec chmod +x {} \;
+
+      - name: Kernel bauen
+        run: |
+          mkdir -p out
+
+          COMMON_FLAGS=(
+            ARCH=arm64
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CC="ccache clang-14"
+            LD=ld.lld-14
+            LLVM_IAS=1
+            O=out
+          )
+
+          make -j$(nproc) "${COMMON_FLAGS[@]}" gta4l_eur_open_defconfig
+          make -j$(nproc) "${COMMON_FLAGS[@]}"
+
+      - name: ccache Statistiken
+        run: ccache --show-stats
+
+      - name: Artefakte einsammeln
+        run: |
+          mkdir -p artifacts
+          BOOT="out/arch/arm64/boot"
+          [ -f "$BOOT/Image.gz" ] && cp "$BOOT/Image.gz" artifacts/
+          [ -f "$BOOT/Image" ]    && cp "$BOOT/Image"    artifacts/
+          find "$BOOT/dts" -name "*.dtb" -exec cp {} artifacts/ \; 2>/dev/null || true
+          find out -name "*.ko"          -exec cp {} artifacts/ \; 2>/dev/null || true
+          ls -lh artifacts/
+
+      - name: boot.img bauen
+        run: |
+          KERNEL_IMG="artifacts/Image.gz"
+          [ -f "$KERNEL_IMG" ] || KERNEL_IMG="artifacts/Image"
+
+          DTB_FILE=$(find artifacts/ -name "*.dtb" | head -1)
+          if [ -z "$DTB_FILE" ]; then
+            echo "FEHLER: Keine DTB in artifacts/"; exit 1
+          fi
+
+          printf '' | gzip > /tmp/empty-ramdisk.gz
+
+          mkbootimg \
+            --kernel         "$KERNEL_IMG" \
+            --ramdisk        /tmp/empty-ramdisk.gz \
+            --cmdline        "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
+            --base           0x00000000 \
+            --pagesize       4096 \
+            --kernel_offset  0x00008000 \
+            --ramdisk_offset 0x01000000 \
+            --tags_offset    0x00000100 \
+            --dtb            "$DTB_FILE" \
+            --dtb_offset     0x01f00000 \
+            --header_version 2 \
+            --output         artifacts/boot.img
+
+          ls -lh artifacts/boot.img
+
+      - name: Artefakte hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: droidian-kernel-gta4lwifi
+          path: artifacts/
+          if-no-files-found: error
           # Packaging-Dateien aus eigenem Repo in den Kernel-Tree kopieren
           PACKAGING="${GITHUB_WORKSPACE}"
           for f in \
