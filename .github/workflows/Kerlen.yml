@@ -7,7 +7,9 @@ on:
 jobs:
   # ─────────────────────────────────────────────────────────────
   # JOB 1: Heribert-Kernel in dieses Repo synchronisieren
-  # Läuft einmalig; legt den Branch "kernel" an / aktualisiert ihn.
+  # Verwendet einen vollständigen (non-shallow) Clone damit
+  # GitHub den Push nicht mit "did not receive expected object"
+  # ablehnt. Der Kernel landet als Branch "kernel".
   # ─────────────────────────────────────────────────────────────
   sync-kernel:
     runs-on: ubuntu-22.04
@@ -18,54 +20,57 @@ jobs:
       - name: Checkout eigenes Repo (Linux-)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0          # vollständig – kein shallow clone
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Heribert-Kernel als Remote hinzufügen & fetchen
+      - name: Heribert-Kernel vollständig klonen
         run: |
-          git remote add heribert \
+          # KEIN --depth=1 – shallow clone → "did not receive expected object"
+          git clone \
             https://github.com/HeribertYavuz/android_kernel_samsung_gta4l.git \
-            || git remote set-url heribert \
-            https://github.com/HeribertYavuz/android_kernel_samsung_gta4l.git
+            /tmp/heribert-kernel
+          echo "==> Heribert-Kernel geklont"
 
-          git fetch heribert 14.0 --depth=1
-
-      - name: Branch "kernel" erstellen oder aktualisieren
+      - name: Branch "kernel" aus Heribert erstellen / aktualisieren
         run: |
-          # Existiert der Branch schon?
-          if git ls-remote --exit-code --heads origin kernel; then
-            echo "==> Branch 'kernel' existiert – wird aktualisiert"
-            git checkout kernel
-            git reset --hard heribert/14.0
-          else
-            echo "==> Branch 'kernel' wird neu erstellt"
-            git checkout -b kernel heribert/14.0
-          fi
+          cd /tmp/heribert-kernel
 
-      - name: Packaging-Dateien aus main-Branch einkopieren
-        run: |
-          # Dateien aus dem main-Branch holen ohne Branch zu wechseln
-          git checkout origin/main -- \
+          # Packaging-Dateien aus eigenem Repo in den Kernel-Tree kopieren
+          PACKAGING="${GITHUB_WORKSPACE}"
+          for f in \
             droidian/defconfig-fragments/halium.config \
             droidian/README.md \
             configs/phosh.css \
-            .github/Con.ini \
-            || echo "Hinweis: Einige Packaging-Dateien noch nicht im main-Branch"
+            .github/Con.ini; do
+            if [ -f "$PACKAGING/$f" ]; then
+              mkdir -p "$(dirname $f)"
+              cp "$PACKAGING/$f" "$f"
+            fi
+          done
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git add -A
-
           if git diff --cached --quiet; then
-            echo "==> Keine Änderungen – kein neuer Commit nötig"
+            echo "==> Keine zusätzlichen Dateien hinzugefügt"
           else
-            git config user.name  "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git commit -m "chore: sync kernel from HeribertYavuz/android_kernel_samsung_gta4l@14.0"
+            git commit -m "chore: add Droidian packaging files from KingYouTober/Linux-"
           fi
 
-      - name: Branch "kernel" pushen
+          echo "==> Kernel-Tree vorbereitet"
+
+      - name: Branch "kernel" in Linux- Repo pushen
         run: |
-          git push origin kernel --force-with-lease
-          echo "==> Branch 'kernel' erfolgreich gepusht"
+          cd /tmp/heribert-kernel
+
+          # Ziel-Repo als Remote setzen (mit Token für Schreibrechte)
+          git remote add target \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/KingYouTober/Linux-.git
+
+          # 14.0-Branch als "kernel" in unser Repo pushen
+          git push target 14.0:refs/heads/kernel --force
+          echo "==> Branch 'kernel' erfolgreich in KingYouTober/Linux- gepusht"
 
   # ─────────────────────────────────────────────────────────────
   # JOB 2: Kernel bauen (wartet auf sync-kernel)
@@ -75,7 +80,7 @@ jobs:
     needs: sync-kernel
 
     steps:
-      - name: Checkout kernel-Branch (der soeben synchronisierte)
+      - name: Checkout kernel-Branch
         uses: actions/checkout@v4
         with:
           ref: kernel
@@ -115,8 +120,6 @@ jobs:
         run: |
           mkdir -p out
 
-          # LLVM_IAS=1: Clangs integrierten Assembler nutzen
-          # → kein externer ARM-Assembler nötig, kein -EL-Fehler
           COMMON_FLAGS=(
             ARCH=arm64
             CROSS_COMPILE=aarch64-linux-gnu-
