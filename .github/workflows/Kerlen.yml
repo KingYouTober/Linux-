@@ -91,6 +91,18 @@ jobs:
           ccache --max-size=5G
           ccache --zero-stats
 
+      # P85946-qrd-overlay.dts enthält kaputte phandles (0xffffffff) –
+      # aus einem Binary-DTB rückkonvertiert ohne Symboltabelle.
+      # dtc crasht mit "Assertion 'generate_fixups' failed".
+      # Das DTBO gehört zu einem anderen Gerät (Bengal QRD), nicht zum gta4lwifi.
+      # Fix: Datei aus dem Makefile entfernen, nicht löschen.
+      - name: Kaputtes P85946 DTBO aus Build ausschließen
+        run: |
+          MAKEFILE="arch/arm64/boot/dts/vendor/qcom/Makefile"
+          sed -i '/P85946-qrd-overlay\.dtbo/d' "$MAKEFILE"
+          echo "==> P85946-qrd-overlay.dtbo aus Build entfernt"
+          grep "P85946" "$MAKEFILE" || echo "==> Sauber, kein P85946 mehr im Makefile"
+
       - name: Halium config-Fragment anwenden
         run: |
           FRAGMENT="droidian/defconfig-fragments/halium.config"
