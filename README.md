@@ -25,7 +25,7 @@ Minimalistisches Linux-System auf dem **Samsung Galaxy Tab A7 Wi-Fi** als Testge
 
 **Geplante Apps:**
 - 💬 Signal (via Axolotl)
-- 🟢 WhatsApp (als Web-App / PWA)
+- 🟢 WhatsApp (als PWA)
 - ⚙️ Einstellungen (WLAN, Bluetooth)
 - 💻 Terminal
 - 🌑 Dunkles minimalistisches Design
@@ -40,193 +40,170 @@ Linux-/
 │
 ├── README.md
 ├── install.sh                          ← Oberfläche einrichten (nach erstem Boot)
-│
 ├── configs/
 │   └── phosh.css                       ← Dunkles Phosh-Theme
-│
 ├── droidian/
-│   ├── build.sh                        ← Lokaler Build
-│   ├── setup.sh                        ← Build-Umgebung vorbereiten
-│   ├── README.md                       ← Kernel-Build Doku
+│   ├── build.sh
+│   ├── setup.sh
 │   └── defconfig-fragments/
 │       └── halium.config               ← Halium/Droidian Kernel-Optionen
-│
 └── .github/
-    ├── Con.ini                         ← Build-Konfiguration
+    ├── Con.ini
     └── workflows/
         └── Kerlen.yml                  ← GitHub Actions Kernel-Build
 ```
 
-> **Branch `kernel`** enthält den vollständigen Kernel-Source (automatisch von GitHub Actions aus [HeribertYavuz/android_kernel_samsung_gta4l](https://github.com/HeribertYavuz/android_kernel_samsung_gta4l) synchronisiert). Nicht manuell bearbeiten.
+> **Branch `kernel`** enthält den vollständigen Kernel-Source — automatisch via GitHub Actions aus [HeribertYavuz/android_kernel_samsung_gta4l](https://github.com/HeribertYavuz/android_kernel_samsung_gta4l) synchronisiert. Nicht manuell bearbeiten.
 
 ---
 
-## ⚠️ Wichtig: Kein TWRP für das SM-T500
-
-Das SM-T500 ist kein normales Fastboot-Gerät. Es gibt **kein offizielles TWRP** für dieses Gerät.
-
-Der Flash-Weg läuft über **Samsung Download Mode** (Heimdall oder Odin):
-
-```
-Samsung Download Mode
-        │
-        ▼
-VBMeta / AVB deaktivieren
-        │
-        ▼
-boot.img flashen (Droidian-Kernel)
-        │
-        ▼
-Droidian Rootfs
-        │
-        ▼
-Halium Android Container
-        │
-        ▼
-Phosh
-```
-
-Der genaue Flash-Ablauf wird erst festgelegt wenn der Port vollständig gebaut ist.
-
----
-
-## 🏗️ Entwicklungsstand
+## 📊 Entwicklungsstand
 
 | Schritt | Aufgabe | Status |
 |---|---|---|
-| 1 | SM-T500 Kernel-Quellen beschaffen | ✅ |
-| 2 | Kernel-Bugs fixen (LLVM_IAS, yylloc, P85946 DTBO) | ✅ |
-| 3 | Halium-Kernel-Optionen (halium.config) | ✅ |
-| 4 | GitHub Actions Build-Workflow | ✅ |
+| 1 | Kernel-Quelle (Heribert 4.19.315) | ✅ |
+| 2 | Kernel-Build-Bugs fixen | ✅ |
+| 3 | Halium Kernel-Optionen (`halium.config`) | ✅ |
+| 4 | GitHub Actions Workflow | ✅ |
 | 5 | Kernel bauen | 🔨 |
-| 6 | boot.img testen (Samsung Download Mode) | ⏳ |
-| 7 | Droidian Adaptation Package erstellen | ⏳ |
-| 8 | Droidian Rootfs integrieren | ⏳ |
+| 6 | Gerät vorbereiten + `vbmeta.img` flashen | ⏳ |
+| 7 | `boot.img` testen | ⏳ |
+| 8 | Droidian Rootfs + Adaptation Package | ⏳ |
 | 9 | Erster Droidian-Boot | ⏳ |
 | 10 | Hardware testen (WLAN, Touch, Audio) | ⏳ |
-| 11 | Phosh konfigurieren | ⏳ |
-| 12 | Signal, WhatsApp, Terminal installieren | ⏳ |
-| 13 | Minimalistische Oberfläche | 🔜 |
+| 11 | Phosh + Apps einrichten | ⏳ |
 
 ---
 
-## 🔧 Kernel
-
-### Kernel-Quelle
-
-Wir verwenden [HeribertYavuz/android_kernel_samsung_gta4l](https://github.com/HeribertYavuz/android_kernel_samsung_gta4l) (Branch `14.0`, Kernel **4.19.315**) statt des originalen Samsung-Quellcodes (4.19.81) weil:
-
-- 234 LTS-Patchlevel mehr (mehr Security-Fixes)
-- Alle Build-Bugs bereits gefixt (LLVM_IAS, `empty.o` HOSTCC, `--prefix notdir`)
-- EROFS-Support aktiviert
-- Kompiliert sauber mit Clang 14 + LLVM_IAS=1
-
-### Kernel bauen (GitHub Actions)
-
-Der Workflow wird manuell ausgelöst:
+## 🔧 Kernel bauen (GitHub Actions)
 
 **Actions → Build Droidian Kernel (gta4lwifi) → Run workflow**
 
-Zwei Optionen beim Start:
-- `sync: false` (Standard) — direkt bauen mit dem vorhandenen `kernel`-Branch (~20min, ab 2. Run ~5min via ccache)
-- `sync: true` — Kernel zuerst von Heribert neu synchronisieren, dann bauen
+Beim Start gibt es ein Dropdown:
+- `sync: false` (Standard) → direkt bauen, ~20 Min (ab 2. Run ~5 Min via ccache)
+- `sync: true` → erst Kernel von Heribert synchronisieren, dann bauen
 
-**Ergebnis:** `boot.img`, `Image.gz`, DTBs und Module als herunterladbare Artifacts.
+**Ergebnis:** `boot.img`, `Image.gz`, DTBs und Kernel-Module als herunterladbare Artifacts.
 
-### Behobene Build-Fehler
+---
 
-| Fehler | Ursache | Fix |
-|---|---|---|
-| `/usr/bin/as: unrecognized option '-EL'` | Clang nutzte x86-Host-Assembler | `LLVM_IAS=1` |
-| `multiple definition of 'yylloc'` | GCC 10+ `-fno-common` Standard | Im Heribert-Repo bereits gefixt |
-| `empty.o` mit CC statt HOSTCC | Samsung Makefile-Bug | Im Heribert-Repo bereits gefixt |
-| `P85946-qrd-overlay: Assertion 'generate_fixups' failed` | Kaputte DTB eines anderen Geräts | Im Workflow via `sed` entfernt |
+## 📲 Gerät vorbereiten
 
-### Halium Kernel-Optionen (`halium.config`)
+### Schritt 1 — Developer Mode + OEM Unlock
 
-Wichtigste Optionen die zum Standard-Defconfig hinzugefügt werden:
+1. **Einstellungen → Über das Tablet → Software-Informationen**
+2. Siebenmal auf **Build-Nummer** tippen → Developer Mode aktiv
+3. **Einstellungen → Entwickleroptionen → OEM-Entsperrung** aktivieren
+4. **USB-Debugging** aktivieren
+5. Tablet neu starten — nochmal in Entwickleroptionen gehen und prüfen ob OEM Unlock wirklich aktiv ist (Haken muss gesetzt sein)
+
+---
+
+## 🔐 VBMeta — was ist das und warum?
+
+Das SM-T500 verwendet Samsungs **Android Verified Boot (AVB)**. Das bedeutet: Jedes Image (Kernel, Recovery, System) wird beim Boot digital signiert geprüft. Wenn ein fremdes `boot.img` geflasht wird, verweigert das Gerät den Boot.
+
+Die Lösung: Eine **leere/deaktivierte `vbmeta.img`** flashen. Damit wird AVB deaktiviert und das Gerät bootet jedes signierte oder unsignierte Image.
+
+> ⚠️ **Wichtig:** Die `vbmeta.img` muss zur Firmware-Version des Tablets passen. Niemals eine `vbmeta.img` von einem anderen Gerät oder einer anderen Firmware-Version verwenden.
+
+### Schritt 2 — `vbmeta.img` herunterladen
+
+Die `vbmeta.img` kommt direkt aus dem offiziellen **LineageOS-Build für gta4lwifi**:
+
+1. Geh zu: **https://download.lineageos.org/devices/gta4lwifi/builds**
+2. Lade den neuesten Nightly-Build herunter (`lineage-*-gta4lwifi-signed.zip`)
+3. In der gleichen Zeile gibt es auch separat: **`vbmeta.img`** — diese Datei herunterladen
+
+> Die LineageOS `vbmeta.img` ist eine leere, deaktivierte VBMeta-Partition und funktioniert für alle Custom-ROMs auf dem gta4lwifi — also auch für Droidian.
+
+### Schritt 3 — Download Mode aktivieren
 
 ```
-CONFIG_DEVTMPFS=y
-CONFIG_VT=y
-CONFIG_NAMESPACES=y
-CONFIG_OVERLAY_FS=y
-CONFIG_IKCONFIG=y
-CONFIG_AUDIT=y
-CONFIG_ANDROID_PARANOID_NETWORK=n
-CONFIG_ANDROID_BINDERFS=n
-CONFIG_SW_SYNC=y
+Tablet ausschalten
+→ Volume Down + Volume Up gleichzeitig halten
+→ USB-Kabel zum PC anschließen
+→ Download Mode erscheint
+→ Lautstärke Hoch drücken um zu bestätigen
+```
+
+### Schritt 4 — Heimdall installieren (Linux/Mac) oder Odin (Windows)
+
+**Linux/Mac — Heimdall (gepatchte Version für gta4lwifi):**
+
+Das normale Heimdall funktioniert **nicht** mit dem SM-T500. Es wird eine gepatchte Version benötigt:
+
+```bash
+# Gepatchtes Heimdall von androidfilehost herunterladen:
+# https://androidfilehost.com/?w=files&flid=338156
+# (Link aus dem offiziellen LineageOS XDA-Thread für gta4lwifi)
+
+# Entpacken und ausführbar machen:
+chmod +x heimdall
+```
+
+**Windows — Odin:**
+```
+Odin4 herunterladen: https://github.com/Adrilaw/OdinV4
+```
+
+### Schritt 5 — `vbmeta.img` flashen
+
+**Linux/Mac (Heimdall):**
+```bash
+./heimdall flash --VBMETA vbmeta.img --no-reboot
+```
+
+**Windows (Odin):**
+```
+AP-Slot → vbmeta.img auswählen
+→ Start
+→ Warten bis PASS! erscheint
+→ NICHT normal neu starten lassen
+```
+
+> ⚠️ Nach dem Flash **nicht normal booten lassen** — direkt in den nächsten Schritt gehen.
+
+---
+
+## 💾 Boot Image flashen
+
+Nach dem `vbmeta.img` Flash direkt das Droidian `boot.img` aus den GitHub Actions Artifacts flashen:
+
+**Linux/Mac (Heimdall):**
+```bash
+./heimdall flash --BOOT boot.img --no-reboot
+```
+
+**Windows (Odin):**
+```
+AP-Slot → boot.img auswählen
+→ Start → PASS! abwarten
 ```
 
 ---
 
-## 🧩 Bekannter Halium-Unterbau
+## 🧱 Halium-Basis
 
-Für das SM-T500 existiert ein Community-Port:
+Für das SM-T500 existiert ein Community-Port auf Basis von LineageOS 19.1 / Android 12 / Halium 12. Laut aktuellem Portstatus funktionieren bereits:
 
-```
-Ubuntu Touch 24.04
-      │
-      └── Halium 12
-            │
-            └── LineageOS 19.1 / Android 12
-```
+- ✅ Boot, Touchscreen, WLAN, Lautsprecher, Lautstärketasten
+- 🟡 Bluetooth, Kamera (noch nicht vollständig)
 
-Laut aktuellem Portstatus funktionieren bereits:
-- ✅ Boot
-- ✅ Touchscreen
-- ✅ WLAN
-- ✅ Lautsprecher
-- ✅ Lautstärketasten
-- 🟡 Bluetooth (noch nicht vollständig)
-- 🟡 Kamera (noch nicht vollständig)
-
-Dieser Halium-12-Unterbau ist die Basis für den Droidian-Port.
-
----
-
-## 🖥️ Geplante Oberfläche
-
-```
-┌─────────────────────────────┐
-│  Phosh – minimalistisch     │
-│                             │
-│   💬  Signal                │
-│   🟢  WhatsApp              │
-│   ⚙️  Einstellungen         │
-│   💻  Terminal              │
-│                             │
-└─────────────────────────────┘
-```
-
-- **Signal** → Axolotl (nativer Linux-Phone-Client)
-- **WhatsApp** → Chromium PWA (`--app=https://web.whatsapp.com`)
-- **Einstellungen** → GNOME Control Center (WLAN, Bluetooth, Display)
-- **Terminal** → foot (leichtgewichtiges Wayland-Terminal)
-- **Theme** → `configs/phosh.css` (dunkel, blaue Akzente)
-
----
-
-## 🔐 Samsung VBMeta / AVB
-
-Das SM-T500 verwendet Samsungs Verified Boot. Für den Custom-Port muss VBMeta deaktiviert werden. Die konkrete `vbmeta.img` muss immer zur verwendeten Halium-Basis passen — keine generische Datei verwenden.
+Dieser Unterbau ist die Basis für den Droidian-Port.
 
 ---
 
 ## 🐞 Debugging
 
-### Halium-Container prüfen
 ```bash
+# Halium-Container prüfen
 lxc-ls --fancy
-```
 
-### Container-Logs
-```bash
+# Container-Logs
 lxc-start -n android --logfile=/tmp/lxclog --logpriority=DEBUG
-```
 
-### Kernel-Logs nach Absturz (Pstore)
-```bash
+# Kernel-Logs nach Absturz (Pstore)
 ls /sys/fs/pstore
 ```
 
@@ -235,136 +212,8 @@ ls /sys/fs/pstore
 ## 📚 Quellen
 
 - **Droidian Porting Guide:** https://docs.droidian.org/porting-guide/
-- **Droidian Kernel Compilation:** https://docs.droidian.org/porting-guide/kernel-compilation/
-- **Kernel-Quelle (Heribert):** https://github.com/HeribertYavuz/android_kernel_samsung_gta4l
+- **Kernel-Quelle:** https://github.com/HeribertYavuz/android_kernel_samsung_gta4l
+- **LineageOS gta4lwifi (vbmeta.img Quelle):** https://download.lineageos.org/devices/gta4lwifi/builds
+- **LineageOS Install Wiki:** https://wiki.lineageos.org/devices/gta4lwifi/install/
+- **XDA Thread (Heimdall + vbmeta):** https://xdaforums.com/t/official-sm-t505-sm-t505n-sm-t505c-sm-t507-gta4l-sm-t500-gta4lwifi-lineageos-23-2-for-galaxy-tab-a7-2020-lte-wifi-version.4576699/
 - **postmarketOS Device Wiki:** https://wiki.postmarketos.org/wiki/Samsung_Galaxy_Tab_A7_(samsung-gta4lwifi)
-- **Ubuntu Touch Community-Port:** https://sourceforge.net/projects/ubuntu-touch-galaxy-tab-a7/erwendete Partition und Firmware zu prüfen.
-
----
-
-## SSH funktioniert nicht
-
-Prüfe zuerst ADB:
-
-```bash
-adb devices
-```
-
-Das Tablet sollte in der Liste erscheinen.
-
-Danach die Weiterleitung erneut setzen:
-
-```bash
-adb forward tcp:2222 tcp:22
-```
-
-Anschließend:
-
-```bash
-ssh -p 2222 droidian@localhost
-```
-
----
-
-## `install.sh` startet nicht
-
-Prüfe, ob das Script vorhanden ist:
-
-```bash
-ls -l install.sh
-```
-
-Danach:
-
-```bash
-sudo bash install.sh
-```
-
----
-
-# 📱 Phase 6 – Sony Xperia Z3
-
-Nachdem das Droidian-System auf dem **Galaxy Tab A7** erfolgreich getestet wurde, soll später zusätzlich ein Sony Xperia Z3 unterstützt werden.
-
-Das Xperia Z3 benötigt jedoch einen **eigenen Kernel**, da es auf einer anderen Hardwareplattform basiert.
-
-Geplant ist daher ein separates Setup:
-
-```text
-Galaxy Tab A7
-└── gta4lwifi
-    └── eigener Droidian-Kernel
-
-Sony Xperia Z3
-└── Snapdragon 801 / MSM8974
-    └── eigener Kernel
-```
-
-Als mögliche Basis soll hierfür **postmarketOS** untersucht werden.
-
-Die Arbeiten am Xperia Z3 beginnen erst, wenn das Tab-A7-Setup stabil funktioniert.
-
----
-
-# 📊 Projektstatus
-
-| Phase | Aufgabe                          | Status |
-| ----- | -------------------------------- | ------ |
-| 1     | Kernel über GitHub Actions bauen | ✅      |
-| 2     | `boot.img` herunterladen         | ⏳      |
-| 3     | TWRP vorbereiten                 | ⏳      |
-| 4     | Droidian Rootfs installieren     | ⏳      |
-| 5     | `install.sh` ausführen           | ⏳      |
-| 6     | System neu starten und testen    | ⏳      |
-| 7     | WhatsApp per QR-Code verbinden   | ⏳      |
-| 8     | Sony Xperia Z3                   | 🔜     |
-
----
-
-# ⚠️ Wichtige Hinweise
-
-Dieses Projekt verändert die Software des Tablets auf System-/Boot-Ebene.
-
-Bevor du mit dem Flashen beginnst:
-
-* wichtige Daten sichern
-* sicherstellen, dass das Gerät wirklich **SM-T500 / gta4lwifi** ist
-* nur passende Images verwenden
-* während eines Flash-Vorgangs das USB-Kabel nicht entfernen
-* bei Fehlern zuerst die genaue Fehlermeldung prüfen, bevor weitere Partitionen verändert werden
-
-Ein fehlerhaftes Image oder ein falscher Flash-Vorgang kann dazu führen, dass das Tablet nicht mehr normal startet.
-
----
-
-# 📌 Kurzfassung
-
-Der komplette Ablauf ist:
-
-```text
-1. GitHub Actions starten
-        ↓
-2. artifacts.zip herunterladen
-        ↓
-3. boot.img entpacken
-        ↓
-4. Tablet vorbereiten
-        ↓
-5. TWRP starten
-        ↓
-6. boot.img installieren
-        ↓
-7. Droidian Rootfs installieren
-        ↓
-8. Droidian starten
-        ↓
-9. Per ADB/SSH verbinden
-        ↓
-10. install.sh ausführen
-        ↓
-11. Neustart
-        ↓
-12. Minimalistisches Linux-System verwenden
-```
-
-Das gewünschte Endergebnis ist ein schlankes Droidian-System auf dem Galaxy Tab A7 mit einer möglichst einfachen Oberfläche und den vier wichtigsten Anwendungen.
