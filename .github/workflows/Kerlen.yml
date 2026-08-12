@@ -40,7 +40,7 @@ jobs:
             droidian/README.md \
             configs/phosh.css \
             flash/flash.sh \
-            flash/LIES_MICH.txt \
+            flash/Readme.md \
             install.sh \
             .github/Con.ini
           do
@@ -190,7 +190,7 @@ jobs:
           cp artifacts/boot.img flash-package/
           cp artifacts/bengal.dtb flash-package/ 2>/dev/null || true
           [ -f "flash/flash.sh" ]      && cp flash/flash.sh flash-package/
-          [ -f "flash/LIES_MICH.txt" ] && cp flash/LIES_MICH.txt flash-package/
+          [ -f "flash/Readme.md" ] && cp flash/Readme.md flash-package/
           cd flash-package
           zip -r "../droidian-gta4lwifi-$(date +%Y%m%d).zip" .
           cd ..
