@@ -25,7 +25,7 @@ jobs:
             https://github.com/HeribertYavuz/android_kernel_samsung_gta4l.git \
             /tmp/heribert-kernel
 
-      - name: Eigenes Repo auschecken (Packaging-Dateien)
+      - name: Eigenes Repo auschecken
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -39,6 +39,9 @@ jobs:
             droidian/defconfig-fragments/halium.config \
             droidian/README.md \
             configs/phosh.css \
+            flash/flash.sh \
+            flash/LIES_MICH.txt \
+            install.sh \
             .github/Con.ini
           do
             if [ -f "$GITHUB_WORKSPACE/packaging/$f" ]; then
@@ -49,7 +52,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git diff --cached --quiet || git commit -m "chore: add Droidian packaging files"
+          git diff --cached --quiet || git commit -m "chore: sync Droidian packaging files"
 
       - name: Branch kernel pushen
         run: |
@@ -76,7 +79,7 @@ jobs:
             bc bison flex libssl-dev libelf-dev \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             python3 make git cpio wget unzip \
-            clang-14 lld-14 llvm-14 mkbootimg ccache
+            clang-14 lld-14 llvm-14 mkbootimg ccache zip
 
       - name: ccache Cache laden
         uses: actions/cache@v4
@@ -91,25 +94,17 @@ jobs:
           ccache --max-size=5G
           ccache --zero-stats
 
-      # P85946-qrd-overlay.dts enthält kaputte phandles (0xffffffff) –
-      # aus einem Binary-DTB rückkonvertiert ohne Symboltabelle.
-      # dtc crasht mit "Assertion 'generate_fixups' failed".
-      # Das DTBO gehört zu einem anderen Gerät (Bengal QRD), nicht zum gta4lwifi.
-      # Fix: Datei aus dem Makefile entfernen, nicht löschen.
-      - name: Kaputtes P85946 DTBO aus Build ausschließen
+      - name: Kaputtes P85946 DTBO entfernen
         run: |
-          MAKEFILE="arch/arm64/boot/dts/vendor/qcom/Makefile"
-          sed -i '/P85946-qrd-overlay\.dtbo/d' "$MAKEFILE"
-          echo "==> P85946-qrd-overlay.dtbo aus Build entfernt"
-          grep "P85946" "$MAKEFILE" || echo "==> Sauber, kein P85946 mehr im Makefile"
+          sed -i '/P85946-qrd-overlay\.dtbo/d' \
+            arch/arm64/boot/dts/vendor/qcom/Makefile
 
       - name: Halium config-Fragment anwenden
         run: |
           FRAGMENT="droidian/defconfig-fragments/halium.config"
           DEFCONFIG="arch/arm64/configs/gta4l_eur_open_defconfig"
           if [ ! -f "$FRAGMENT" ]; then
-            echo "FEHLER: halium.config nicht gefunden"
-            exit 1
+            echo "FEHLER: halium.config nicht gefunden"; exit 1
           fi
           if [ ! -f "$DEFCONFIG" ]; then
             echo "FEHLER: defconfig nicht gefunden"
@@ -126,7 +121,6 @@ jobs:
           mkdir -p out
           export CCACHE_DIR=~/.ccache
           export PATH="/usr/lib/ccache:$PATH"
-
           make -j$(nproc) \
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -135,7 +129,6 @@ jobs:
             LLVM_IAS=1 \
             O=out \
             gta4l_eur_open_defconfig
-
           make -j$(nproc) \
             ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -153,7 +146,15 @@ jobs:
           BOOT="out/arch/arm64/boot"
           [ -f "$BOOT/Image.gz" ] && cp "$BOOT/Image.gz" artifacts/
           [ -f "$BOOT/Image" ]    && cp "$BOOT/Image" artifacts/
-          find "$BOOT/dts" -name "*.dtb" -exec cp {} artifacts/ \; 2>/dev/null || true
+
+          DTB_PATH="$BOOT/dts/vendor/qcom/bengal.dtb"
+          if [ -f "$DTB_PATH" ]; then
+            cp "$DTB_PATH" artifacts/bengal.dtb
+          else
+            echo "WARNUNG: bengal.dtb nicht gefunden, kopiere alle DTBs"
+            find "$BOOT/dts" -name "*.dtb" -exec cp {} artifacts/ \;
+          fi
+
           find out -name "*.ko" -exec cp {} artifacts/ \; 2>/dev/null || true
           ls -lh artifacts/
 
@@ -161,30 +162,45 @@ jobs:
         run: |
           KERNEL_IMG="artifacts/Image.gz"
           [ -f "$KERNEL_IMG" ] || KERNEL_IMG="artifacts/Image"
-          DTB_FILE=$(find artifacts/ -name "*.dtb" | head -1)
+          DTB_FILE="artifacts/bengal.dtb"
+          [ -f "$DTB_FILE" ] || DTB_FILE=$(find artifacts/ -name "*.dtb" | head -1)
           if [ -z "$DTB_FILE" ]; then
-            echo "FEHLER: Keine DTB in artifacts/"
-            exit 1
+            echo "FEHLER: Keine DTB in artifacts/"; exit 1
           fi
+          echo "Nutze DTB: $DTB_FILE"
           printf '' | gzip > /tmp/empty-ramdisk.gz
           mkbootimg \
-            --kernel "$KERNEL_IMG" \
-            --ramdisk /tmp/empty-ramdisk.gz \
-            --cmdline "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
-            --base 0x00000000 \
-            --pagesize 4096 \
-            --kernel_offset 0x00008000 \
+            --kernel         "$KERNEL_IMG" \
+            --ramdisk        /tmp/empty-ramdisk.gz \
+            --cmdline        "console=ttyMSM0,115200n8 androidboot.hardware=qcom androidboot.console=ttyMSM0 androidboot.memcg=1 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 service_locator.enable=1 swiotlb=2048 loop.max_part=7 androidboot.usbcontroller=a600000.dwc3 console=tty0 droidian.lvm.prefer" \
+            --base           0x00000000 \
+            --pagesize       4096 \
+            --kernel_offset  0x00008000 \
             --ramdisk_offset 0x01000000 \
-            --tags_offset 0x00000100 \
-            --dtb "$DTB_FILE" \
-            --dtb_offset 0x01f00000 \
+            --tags_offset    0x00000100 \
+            --dtb            "$DTB_FILE" \
+            --dtb_offset     0x01f00000 \
             --header_version 2 \
-            --output artifacts/boot.img
+            --output         artifacts/boot.img
           ls -lh artifacts/boot.img
 
-      - name: Artefakte hochladen
+      - name: Flash-Paket ZIP bauen
+        run: |
+          mkdir -p flash-package
+          cp artifacts/boot.img flash-package/
+          cp artifacts/bengal.dtb flash-package/ 2>/dev/null || true
+          [ -f "flash/flash.sh" ]      && cp flash/flash.sh flash-package/
+          [ -f "flash/LIES_MICH.txt" ] && cp flash/LIES_MICH.txt flash-package/
+          cd flash-package
+          zip -r "../droidian-gta4lwifi-$(date +%Y%m%d).zip" .
+          cd ..
+          ls -lh droidian-gta4lwifi-*.zip
+
+      - name: Alles hochladen
         uses: actions/upload-artifact@v4
         with:
-          name: droidian-kernel-gta4lwifi
-          path: artifacts/
+          name: droidian-gta4lwifi
+          path: |
+            droidian-gta4lwifi-*.zip
+            artifacts/
           if-no-files-found: error
