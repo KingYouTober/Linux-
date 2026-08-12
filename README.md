@@ -1,4 +1,4 @@
-# Droidian – Samsung Galaxy Tab A7 Wi-Fi
+# Droidian — Samsung Galaxy Tab A7 (SM-T500 / gta4lwifi)
 
 **Eigener Droidian-Port für das Samsung Galaxy Tab A7 (SM-T500 / `gta4lwifi`)**
 
@@ -36,31 +36,21 @@ Minimalistisches Linux-System auf dem **Samsung Galaxy Tab A7 Wi-Fi** als Testge
 
 ```
 Linux-/
-│
-├── README.md                           ← Diese Datei
+├── README.md
 ├── install.sh                          ← Oberfläche einrichten (nach erstem Boot)
-│
 ├── configs/
 │   └── phosh.css                       ← Dunkles Phosh-Theme (blau/schwarz)
-│
-├── flash/
-│   ├── flash.sh                        ← Flash-Script (Linux/Mac, Heimdall)
-│   └── Readme.md                       ← Flash-Anleitung + Voraussetzungen
-│
 ├── droidian/
 │   ├── build.sh                        ← Lokaler Docker-Build (optional)
 │   ├── setup.sh                        ← Lokale Build-Umgebung vorbereiten
 │   ├── README.md                       ← Kernel-Build Dokumentation
 │   └── defconfig-fragments/
 │       └── halium.config               ← Halium/Droidian Kernel-Optionen
-│
 └── .github/
     ├── Con.ini                         ← Build-Konfiguration
     └── workflows/
         └── Kerlen.yml                  ← GitHub Actions Kernel-Build
 ```
-
-> **Branch `kernel`** enthält den vollständigen Kernel-Source — automatisch via GitHub Actions aus [HeribertYavuz/android_kernel_samsung_gta4l](https://github.com/HeribertYavuz/android_kernel_samsung_gta4l) (Branch `14.0`, Kernel 4.19.315) synchronisiert. Nicht manuell bearbeiten.
 
 ---
 
@@ -73,14 +63,14 @@ Linux-/
 | 3 | Halium Kernel-Optionen (`halium.config`) | ✅ |
 | 4 | GitHub Actions Workflow mit ccache | ✅ |
 | 5 | Kernel erfolgreich gebaut (`boot.img`) | ✅ |
-| 6 | Flash-Script + Anleitung (`flash/`) | ✅ |
-| 7 | Einrichtungs-Script (`install.sh`) | ✅ |
-| 8 | Gerät vorbereiten + `vbmeta.img` + `boot.img` flashen | ⏳ |
-| 9 | Droidian Rootfs flashen | ⏳ |
-| 10 | Erster Droidian-Boot | ⏳ |
-| 11 | Hardware testen (WLAN, Touch, Audio, Bluetooth) | ⏳ |
-| 12 | Phosh + Apps einrichten (`install.sh` ausführen) | ⏳ |
-| 13 | Droidian Adaptation Package erstellen | ⏳ |
+| 6 | Einrichtungs-Script (`install.sh`) | ✅ |
+| 7 | Gerät vorbereiten (OEM Unlock) | ⏳ |
+| 8 | `vbmeta.img` + `boot.img` flashen (Odin3) | ⏳ ← **du bist hier** |
+| 9 | LineageOS Recovery flashen | ⏳ |
+| 10 | Droidian Rootfs via `adb sideload` flashen | ⏳ |
+| 11 | Erster Droidian-Boot | ⏳ |
+| 12 | Hardware testen (WLAN, Touch, Audio, Bluetooth) | ⏳ |
+| 13 | Phosh + Apps einrichten (`install.sh` ausführen) | ⏳ |
 | 14 | Stabiler Port | 🔜 |
 
 ---
@@ -91,117 +81,194 @@ Linux-/
 
 | Option | Beschreibung |
 |---|---|
-| `sync: false` | Direkt bauen mit vorhandenem `kernel`-Branch (~20 Min, ab 2. Run ~5 Min via ccache) |
+| `sync: false` | Direkt bauen (~20 Min, ab 2. Run ~5 Min via ccache) |
 | `sync: true` | Erst Kernel von Heribert neu synchronisieren, dann bauen |
 
-**Ergebnis:** ZIP-Datei (`droidian-gta4lwifi-DATUM.zip`) mit `boot.img`, `bengal.dtb`, `flash.sh` und Anleitung — fertig zum Flashen.
+**Ergebnis:** ZIP mit `boot.img`, `bengal.dtb`, `Image.gz` — fertig zum Flashen.
 
 ### Behobene Build-Fehler
 
-| Fehler | Ursache | Fix |
-|---|---|---|
-| `/usr/bin/as: unrecognized option '-EL'` | x86-Host-Assembler statt ARM | `LLVM_IAS=1` |
-| `multiple definition of 'yylloc'` | GCC 10+ `-fno-common` | Im Heribert-Repo bereits gefixt |
-| `empty.o` mit CC statt HOSTCC | Samsung Makefile-Bug | Im Heribert-Repo bereits gefixt |
-| `P85946: Assertion 'generate_fixups' failed` | Kaputte DTB eines anderen Geräts (Bengal QRD) | Via `sed` aus Makefile entfernt |
+| Fehler | Fix |
+|---|---|
+| `/usr/bin/as: unrecognized option '-EL'` | `LLVM_IAS=1` |
+| `multiple definition of 'yylloc'` | Im Heribert-Repo bereits gefixt |
+| `P85946: Assertion 'generate_fixups' failed` | Via `sed` aus Makefile entfernt |
 
 ---
 
-## 📲 Gerät vorbereiten
+## 📲 Schritt 7 — Gerät vorbereiten
 
-### 1. Developer Mode + OEM Unlock
+**Voraussetzungen am PC:** `adb` und `Odin3` installiert
 
-1. **Einstellungen → Über das Tablet → Software-Informationen**
-2. Siebenmal auf **Build-Nummer** tippen → Developer Mode aktiv
-3. **Einstellungen → Entwickleroptionen → OEM-Entsperrung** aktivieren
-4. **USB-Debugging** aktivieren
-5. Neu starten → Entwickleroptionen nochmal öffnen und prüfen ob OEM-Entsperrung wirklich gesetzt ist
+**Developer Mode + OEM Unlock auf dem Tablet:**
+1. Einstellungen → Über das Tablet → Software-Informationen
+2. 7× auf **Build-Nummer** tippen
+3. Entwickleroptionen → **OEM-Entsperrung** aktivieren
+4. USB-Debugging aktivieren
+5. Neu starten und prüfen ob OEM-Entsperrung noch aktiv ist
 
 ---
 
-## 🔐 VBMeta — AVB deaktivieren
+## 🔐 Schritt 8 — vbmeta.img + boot.img flashen
 
-Das SM-T500 prüft beim Boot jedes Image kryptografisch (Android Verified Boot). Ohne Deaktivierung bootet kein Custom-Kernel.
+> Du hast `boot.img` und `vbmeta.img` bereits aus den GitHub Actions Artifacts.
 
-**Lösung:** Eine leere `vbmeta.img` flashen → AVB deaktiviert → Gerät bootet jedes Image.
+Das SM-T500 prüft beim Boot jedes Image kryptografisch (Android Verified Boot / AVB).
+Die `vbmeta.img` deaktiviert AVB → danach bootet der eigene Kernel.
 
-### vbmeta.img herunterladen
-
-Die `vbmeta.img` kommt direkt von **LineageOS** — sie ist für das gta4lwifi gemacht und funktioniert auch für Droidian:
-
-1. Geh zu: **https://download.lineageos.org/devices/gta4lwifi/builds**
-2. Neueste Zeile → rechts den `vbmeta.img` Link herunterladen
-
-> ⚠️ Niemals eine `vbmeta.img` von einem anderen Gerät verwenden.
-
-### Heimdall (Linux/Mac)
-
-Das SM-T500 benötigt eine **gepatchte Heimdall-Version** — das normale Heimdall funktioniert nicht:
-
-```
-https://androidfilehost.com/?w=files&flid=338156
-```
+> ⚠️ TWRP gibt es nicht für das SM-T500. Stattdessen wird **Odin3** + **LineageOS Recovery** verwendet.
 
 ### Download Mode starten
 
 ```
 Tablet ausschalten
-→ Volume Down + Volume Up gleichzeitig halten
+→ Volume Down + Volume Up + Power gleichzeitig halten
 → USB-Kabel zum PC anschließen
-→ Mit Volume Up bestätigen
+→ Mit Volume Up "Device unlock mode" bestätigen
 ```
 
-### Flashen
+### vbmeta.img flashen (Odin3)
 
-**Linux/Mac:**
+**Odin3 herunterladen:** https://odindownload.com/ → Odin3 v3.13.1
+
 ```bash
-# vbmeta.img und boot.img in den flash/-Ordner kopieren
-# heimdall ebenfalls dort hinein
-cd flash/
-./flash.sh
+# vbmeta.img als .tar verpacken (Odin3 braucht .tar):
+tar --format=ustar -cvf vbmeta.tar vbmeta.img
 ```
 
-**Windows (Odin4):**
+In Odin3:
 ```
-Odin4: https://github.com/Adrilaw/OdinV4
-→ AP: vbmeta.img → Start → PASS! abwarten → NICHT neu starten
-→ AP: boot.img   → Start → PASS! abwarten
-→ Tablet manuell neu starten
+AP → vbmeta.tar auswählen → Start → PASS! abwarten
+→ Tablet startet neu → Android Setup durchklicken (WLAN überspringen)
+→ Danach Developer Mode + OEM Unlock nochmal aktivieren (wird zurückgesetzt)
+```
+
+### boot.img flashen (Odin3)
+
+```bash
+tar --format=ustar -cvf boot.tar boot.img
+```
+
+In Odin3:
+```
+AP → boot.tar auswählen → Start → PASS! abwarten
+→ Tablet startet neu
 ```
 
 ---
 
-## 💾 Droidian Rootfs
+## 🔁 Schritt 9 — LineageOS Recovery flashen
 
-Nach dem ersten Boot mit dem Droidian-Kernel muss noch das Rootfs geflasht werden:
+> TWRP gibt es nicht für das SM-T500. Die **LineageOS Recovery** übernimmt diese Rolle — sie kann per `adb sideload` jedes ZIP flashen, also auch das Droidian Rootfs.
+
+### LineageOS Recovery herunterladen
+
+```
+https://download.lineageos.org/devices/gta4lwifi/builds
+```
+
+Neueste Zeile → `recovery.img` herunterladen.
+
+### Als .tar verpacken und flashen
+
+```bash
+tar --format=ustar -cvf recovery.tar recovery.img
+```
+
+In Odin3:
+```
+Options → Auto Reboot DEAKTIVIEREN (wichtig!)
+AP → recovery.tar auswählen → Start → PASS! abwarten
+→ USB-Kabel trennen
+```
+
+### In Recovery booten
+
+Sofort nach dem Flash (Tablet zeigt noch "Downloading..."):
+```
+Volume Up + Power halten → loslassen sobald Bildschirm schwarz wird
+→ LineageOS Recovery startet
+```
+
+> ⚠️ Nicht warten — bootet das Tablet normal, überschreibt Samsung die Recovery wieder mit der Stock-Version.
+
+---
+
+## 💾 Schritt 10 — Droidian Rootfs flashen
+
+### Droidian Rootfs herunterladen
 
 ```
 https://github.com/droidian-images/rootfs-api29gsi-all/releases/latest
 ```
 
-Genaue Vorgehensweise folgt wenn der Kernel-Boot bestätigt ist.
+Datei: `droidian-ROOTFS-arm64_DATUM_arm64.zip`
+
+### Daten löschen (Erstinstallation)
+
+In der LineageOS Recovery:
+```
+Factory Reset → Format data / factory reset → "Format" bestätigen
+→ Zurück zum Hauptmenü
+```
+
+> ⚠️ Löscht alle Daten auf dem Tablet.
+
+### Rootfs via adb sideload flashen
+
+In der LineageOS Recovery:
+```
+Apply Update → Apply from ADB
+```
+
+Am PC:
+```bash
+adb -d sideload droidian-ROOTFS-arm64_*.zip
+```
+
+Warten bis fertig. Falls die Ausgabe bei 47% hängt und `adb: failed to read command: Success` kommt — das ist normal, der Flash war erfolgreich.
+
+### Reboot
+
+```
+In der Recovery → Reboot system now
+```
+
+Der **erste Boot dauert 3–5 Minuten** — Droidian richtet sich ein. Das ist normal.
 
 ---
 
-## 🖥️ Oberfläche einrichten
+## 🖥️ Schritt 11 — Erster Boot
 
-Nach dem ersten erfolgreichen Droidian-Boot via SSH verbinden und `install.sh` ausführen:
+Nach dem Boot erscheint der **Phosh Lockscreen** (Uhr auf schwarzem Hintergrund).
+
+Standard-Login: PIN `1234`
+
+### Via SSH verbinden (bequemer als Tippen auf dem Tablet)
 
 ```bash
 # Am PC:
 adb forward tcp:2222 tcp:22
 ssh -p 2222 droidian@localhost
 # Passwort: 1234
+```
 
-# Auf dem Tablet:
+---
+
+## ⚙️ Schritt 13 — Oberfläche einrichten (install.sh)
+
+```bash
+# Auf dem Tablet via SSH:
+wget https://raw.githubusercontent.com/KingYouTober/Linux-/main/install.sh
 sudo bash install.sh
+sudo reboot
 ```
 
 `install.sh` richtet automatisch ein:
 - System-Update
-- WLAN (interaktiv)
+- WLAN (interaktiv — fragt nach SSID und Passwort)
 - Signal (Axolotl via Flatpak)
-- WhatsApp (Chromium PWA)
+- WhatsApp (Chromium PWA — beim ersten Start QR-Code mit Handy scannen)
 - Terminal (foot)
 - Einstellungen (GNOME Control Center)
 - Dunkles Phosh-Theme (`configs/phosh.css`)
@@ -211,9 +278,7 @@ sudo bash install.sh
 
 ---
 
-## 🧱 Halium-Basis
-
-Für das SM-T500 existiert ein Community-Port auf Basis von LineageOS 19.1 / Android 12 / Halium 12.
+## 🧱 Halium Hardware-Status
 
 | Komponente | Status |
 |---|---|
@@ -246,7 +311,8 @@ ls /sys/fs/pstore
 
 - **Droidian Porting Guide:** https://docs.droidian.org/porting-guide/
 - **Kernel-Quelle (Heribert):** https://github.com/HeribertYavuz/android_kernel_samsung_gta4l
-- **LineageOS gta4lwifi (vbmeta.img):** https://download.lineageos.org/devices/gta4lwifi/builds
-- **Heimdall (gepatchte Version):** https://androidfilehost.com/?w=files&flid=338156
+- **LineageOS Recovery + vbmeta.img:** https://download.lineageos.org/devices/gta4lwifi/builds
+- **LineageOS Installationsanleitung (gta4lwifi):** https://wiki.lineageos.org/devices/gta4lwifi/install/
+- **Odin3:** https://odindownload.com/
 - **XDA Thread:** https://xdaforums.com/t/official-sm-t505-sm-t505n-sm-t505c-sm-t507-gta4l-sm-t500-gta4lwifi-lineageos-23-2-for-galaxy-tab-a7-2020-lte-wifi-version.4576699/
 - **postmarketOS Device Wiki:** https://wiki.postmarketos.org/wiki/Samsung_Galaxy_Tab_A7_(samsung-gta4lwifi)
